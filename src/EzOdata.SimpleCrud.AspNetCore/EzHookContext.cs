@@ -4,7 +4,21 @@ using EzOdata.SimpleCrud;
 
 namespace EzOdata.SimpleCrud.AspNetCore;
 
-public enum EzOperation { Read, Insert, Update, Delete }
+/// <summary>The API operation a hook is running for.</summary>
+public enum EzOperation
+{
+    /// <summary>GET, $count, $expand.</summary>
+    Read,
+
+    /// <summary>POST.</summary>
+    Insert,
+
+    /// <summary>PATCH or PUT.</summary>
+    Update,
+
+    /// <summary>DELETE.</summary>
+    Delete,
+}
 
 /// <summary>What a hook sees: who is calling, which table, and SimpleCRUD bound to the right database.</summary>
 public sealed class EzHookContext
@@ -27,11 +41,13 @@ public sealed class EzHookContext
         CancellationToken = cancellationToken;
     }
 
+    /// <summary>The ez-odata service name (the URL segment).</summary>
     public string ServiceName { get; }
 
     /// <summary>The API entity set name (the table's exposed name).</summary>
     public string Table => _binding.Table.ExposedName;
 
+    /// <summary>Read, insert, update or delete.</summary>
     public EzOperation Operation { get; }
 
     /// <summary>The caller (from the host's authentication); an anonymous principal when there is none.</summary>
@@ -43,6 +59,7 @@ public sealed class EzHookContext
     /// <summary>Request-scoped services when in an HTTP request, else the root provider.</summary>
     public IServiceProvider Services { get; }
 
+    /// <summary>The isolated SimpleCRUD engine for this service's dialect.</summary>
     public SimpleCrudEngine Engine { get; }
 
     /// <summary>For writes: the API write's own connection + transaction. Null for reads.</summary>
@@ -54,7 +71,42 @@ public sealed class EzHookContext
     /// </summary>
     public ISimpleCrudOperations Crud => Session ?? _client();
 
+    /// <summary>Cancelled when the request is aborted.</summary>
     public CancellationToken CancellationToken { get; }
+
+    /// <summary>
+    /// Run <paramref name="callback"/> once, after the write's transaction commits: the place for
+    /// external side effects (email, queues, cache busting). Never runs if the write rolls back, and a
+    /// retried attempt's callbacks are discarded with it. Failures are logged; the committed write stands.
+    /// </summary>
+    public void OnCommitted(Func<Task> callback)
+    {
+        if (Session is null) throw new InvalidOperationException("OnCommitted is only available in write hooks.");
+        (_onCommitted ??= []).Add(callback);
+    }
+
+    /// <inheritdoc cref="OnCommitted(Func{Task})"/>
+    public void OnCommitted(Action callback) => OnCommitted(() => { callback(); return Task.CompletedTask; });
+
+    private List<Func<Task>>? _onCommitted;
+
+    internal async Task RunCommittedCallbacksAsync(Microsoft.Extensions.Logging.ILogger logger)
+    {
+        if (_onCommitted is null) return;
+        foreach (var callback in _onCommitted)
+        {
+            try
+            {
+                await callback();
+            }
+            catch (Exception ex)
+            {
+                Microsoft.Extensions.Logging.LoggerExtensions.LogError(logger, ex,
+                    "OnCommitted callback failed for {Service}/{Table} ({Operation}); the write was already committed.",
+                    ServiceName, Table, Operation);
+            }
+        }
+    }
 
     /// <summary>Per-operation scratch space shared between Before/After hooks.</summary>
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -74,7 +126,9 @@ public sealed class EzHookContext
 /// <summary>Thrown by <see cref="EzHookContext.Reject"/> / <see cref="EzHookContext.Forbid"/>; mapped to an API error.</summary>
 public sealed class EzHookException : Exception
 {
+    /// <summary>Creates the exception with an ez-odata error code (mapped to an HTTP status).</summary>
     public EzHookException(string errorCode, string message) : base(message) => ErrorCode = errorCode;
 
+    /// <summary>The ez-odata error code, e.g. <c>Validation.InvalidValue</c> (400) or <c>Forbidden.RowFilter</c> (403).</summary>
     public string ErrorCode { get; }
 }

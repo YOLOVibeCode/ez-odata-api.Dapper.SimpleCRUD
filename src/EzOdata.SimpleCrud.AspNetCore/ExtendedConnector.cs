@@ -9,6 +9,8 @@ using EzOdata.Core.Query;
 using EzOdata.SimpleCrud;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace EzOdata.SimpleCrud.AspNetCore;
 
@@ -81,6 +83,9 @@ internal sealed class ExtendedConnectorRegistry(IConnectorRegistry inner, EzExte
 internal sealed class ExtensionRuntime(ServiceExtension extension, ISqlDialect dialect, IServiceProvider root)
 {
     private readonly IHttpContextAccessor? _http = root.GetService<IHttpContextAccessor>();
+
+    public ILogger Logger { get; } =
+        root.GetService<ILoggerFactory>()?.CreateLogger("EzOdata.SimpleCrud.AspNetCore") ?? NullLogger.Instance;
 
     public ServiceExtension Extension => extension;
     public ISqlDialect Dialect => dialect;
@@ -228,6 +233,7 @@ internal sealed class SimpleCrudWriteExecutor(IWriteExecutor inner, ExtensionRun
             }
 
             session.Commit();
+            foreach (var step in steps) await step.Context.RunCommittedCallbacksAsync(runtime.Logger);
             return results;
         }
         catch

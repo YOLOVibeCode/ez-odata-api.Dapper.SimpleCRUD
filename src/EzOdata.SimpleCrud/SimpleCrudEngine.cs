@@ -35,6 +35,7 @@ public sealed class SimpleCrudEngine
         Name = name;
         Naming = naming;
         _methods = ResolveMethods(crudType);
+        VerifyMetadataMembers(crudType);
     }
 
     /// <summary>The dialect this engine was created for.</summary>
@@ -58,53 +59,68 @@ public sealed class SimpleCrudEngine
     /// <summary>Delegates compiled so far (tests: proves the per-call path is cached).</summary>
     internal int CompiledDelegateCount => _delegates.Count;
 
+    /// <inheritdoc />
     public override string ToString() => Name;
 
     // ---- Get ---------------------------------------------------------------------------------
 
+    /// <inheritdoc cref="SimpleCRUD.Get{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public T? Get<T>(IDbConnection connection, object id, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, T?>>("Get", typeof(T))(connection, id, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.GetAsync{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public Task<T?> GetAsync<T>(IDbConnection connection, object id, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, Task<T?>>>("GetAsync", typeof(T))(connection, id, transaction, commandTimeout);
 
     // ---- GetList -----------------------------------------------------------------------------
 
+    /// <inheritdoc cref="SimpleCRUD.GetList{T}(IDbConnection)"/>
     public IEnumerable<T> GetList<T>(IDbConnection connection) =>
         Bind<Func<IDbConnection, IEnumerable<T>>>("GetList:all", typeof(T))(connection);
 
+    /// <inheritdoc cref="SimpleCRUD.GetList{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public IEnumerable<T> GetList<T>(IDbConnection connection, object whereConditions, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, IEnumerable<T>>>("GetList:obj", typeof(T))(connection, whereConditions, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.GetList{T}(IDbConnection, string, object, IDbTransaction, System.Nullable{int})"/>
     public IEnumerable<T> GetList<T>(IDbConnection connection, string conditions, object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, string, object?, IDbTransaction?, int?, IEnumerable<T>>>("GetList:str", typeof(T))(connection, conditions, parameters, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.GetListAsync{T}(IDbConnection)"/>
     public Task<IEnumerable<T>> GetListAsync<T>(IDbConnection connection) =>
         Bind<Func<IDbConnection, Task<IEnumerable<T>>>>("GetListAsync:all", typeof(T))(connection);
 
+    /// <inheritdoc cref="SimpleCRUD.GetListAsync{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public Task<IEnumerable<T>> GetListAsync<T>(IDbConnection connection, object whereConditions, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, Task<IEnumerable<T>>>>("GetListAsync:obj", typeof(T))(connection, whereConditions, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.GetListAsync{T}(IDbConnection, string, object, IDbTransaction, System.Nullable{int})"/>
     public Task<IEnumerable<T>> GetListAsync<T>(IDbConnection connection, string conditions, object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, string, object?, IDbTransaction?, int?, Task<IEnumerable<T>>>>("GetListAsync:str", typeof(T))(connection, conditions, parameters, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.GetListPaged{T}(IDbConnection, int, int, string, string, object, IDbTransaction, System.Nullable{int})"/>
     public IEnumerable<T> GetListPaged<T>(IDbConnection connection, int pageNumber, int rowsPerPage, string conditions, string orderby, object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, int, int, string, string, object?, IDbTransaction?, int?, IEnumerable<T>>>("GetListPaged", typeof(T))(connection, pageNumber, rowsPerPage, conditions, orderby, parameters, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.GetListPagedAsync{T}(IDbConnection, int, int, string, string, object, IDbTransaction, System.Nullable{int})"/>
     public Task<IEnumerable<T>> GetListPagedAsync<T>(IDbConnection connection, int pageNumber, int rowsPerPage, string conditions, string orderby, object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, int, int, string, string, object?, IDbTransaction?, int?, Task<IEnumerable<T>>>>("GetListPagedAsync", typeof(T))(connection, pageNumber, rowsPerPage, conditions, orderby, parameters, transaction, commandTimeout);
 
     // ---- Insert ------------------------------------------------------------------------------
 
+    /// <inheritdoc cref="SimpleCRUD.Insert{TEntity}(IDbConnection, TEntity, IDbTransaction, System.Nullable{int})"/>
     public int? Insert<TEntity>(IDbConnection connection, TEntity entityToInsert, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, TEntity, IDbTransaction?, int?, int?>>("Insert:1", typeof(TEntity))(connection, entityToInsert, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.Insert{TKey, TEntity}(IDbConnection, TEntity, IDbTransaction, System.Nullable{int})"/>
     public TKey Insert<TKey, TEntity>(IDbConnection connection, TEntity entityToInsert, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, TEntity, IDbTransaction?, int?, TKey>>("Insert:2", typeof(TEntity), typeof(TKey))(connection, entityToInsert, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.InsertAsync{TEntity}(IDbConnection, TEntity, IDbTransaction, System.Nullable{int})"/>
     public Task<int?> InsertAsync<TEntity>(IDbConnection connection, TEntity entityToInsert, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, TEntity, IDbTransaction?, int?, Task<int?>>>("InsertAsync:1", typeof(TEntity))(connection, entityToInsert, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.InsertAsync{TKey, TEntity}(IDbConnection, TEntity, IDbTransaction, System.Nullable{int})"/>
     public Task<TKey> InsertAsync<TKey, TEntity>(IDbConnection connection, TEntity entityToInsert, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, TEntity, IDbTransaction?, int?, Task<TKey>>>("InsertAsync:2", typeof(TEntity), typeof(TKey))(connection, entityToInsert, transaction, commandTimeout);
 
@@ -117,49 +133,63 @@ public sealed class SimpleCrudEngine
 
     // ---- Update ------------------------------------------------------------------------------
 
+    /// <inheritdoc cref="SimpleCRUD.Update{TEntity}(IDbConnection, TEntity, IDbTransaction, System.Nullable{int})"/>
     public int Update<TEntity>(IDbConnection connection, TEntity entityToUpdate, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, TEntity, IDbTransaction?, int?, int>>("Update", typeof(TEntity))(connection, entityToUpdate, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.UpdateAsync{TEntity}(IDbConnection, TEntity, IDbTransaction, System.Nullable{int}, System.Nullable{System.Threading.CancellationToken})"/>
     public Task<int> UpdateAsync<TEntity>(IDbConnection connection, TEntity entityToUpdate, IDbTransaction? transaction = null, int? commandTimeout = null, CancellationToken? token = null) =>
         Bind<Func<IDbConnection, TEntity, IDbTransaction?, int?, CancellationToken?, Task<int>>>("UpdateAsync", typeof(TEntity))(connection, entityToUpdate, transaction, commandTimeout, token);
 
     // ---- Delete ------------------------------------------------------------------------------
 
+    /// <inheritdoc cref="SimpleCRUD.Delete{T}(IDbConnection, T, IDbTransaction, System.Nullable{int})"/>
     public int Delete<T>(IDbConnection connection, T entityToDelete, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, T, IDbTransaction?, int?, int>>("Delete:entity", typeof(T))(connection, entityToDelete, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.Delete{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public int Delete<T>(IDbConnection connection, object id, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, int>>("Delete:id", typeof(T))(connection, id, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.DeleteAsync{T}(IDbConnection, T, IDbTransaction, System.Nullable{int})"/>
     public Task<int> DeleteAsync<T>(IDbConnection connection, T entityToDelete, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, T, IDbTransaction?, int?, Task<int>>>("DeleteAsync:entity", typeof(T))(connection, entityToDelete, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.DeleteAsync{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public Task<int> DeleteAsync<T>(IDbConnection connection, object id, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, Task<int>>>("DeleteAsync:id", typeof(T))(connection, id, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.DeleteList{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public int DeleteList<T>(IDbConnection connection, object whereConditions, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, int>>("DeleteList:obj", typeof(T))(connection, whereConditions, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.DeleteList{T}(IDbConnection, string, object, IDbTransaction, System.Nullable{int})"/>
     public int DeleteList<T>(IDbConnection connection, string conditions, object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, string, object?, IDbTransaction?, int?, int>>("DeleteList:str", typeof(T))(connection, conditions, parameters, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.DeleteListAsync{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public Task<int> DeleteListAsync<T>(IDbConnection connection, object whereConditions, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, Task<int>>>("DeleteListAsync:obj", typeof(T))(connection, whereConditions, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.DeleteListAsync{T}(IDbConnection, string, object, IDbTransaction, System.Nullable{int})"/>
     public Task<int> DeleteListAsync<T>(IDbConnection connection, string conditions, object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, string, object?, IDbTransaction?, int?, Task<int>>>("DeleteListAsync:str", typeof(T))(connection, conditions, parameters, transaction, commandTimeout);
 
     // ---- RecordCount -------------------------------------------------------------------------
 
+    /// <inheritdoc cref="SimpleCRUD.RecordCount{T}(IDbConnection, string, object, IDbTransaction, System.Nullable{int})"/>
     public int RecordCount<T>(IDbConnection connection, string conditions = "", object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, string, object?, IDbTransaction?, int?, int>>("RecordCount:str", typeof(T))(connection, conditions, parameters, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.RecordCount{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public int RecordCount<T>(IDbConnection connection, object whereConditions, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, int>>("RecordCount:obj", typeof(T))(connection, whereConditions, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.RecordCountAsync{T}(IDbConnection, string, object, IDbTransaction, System.Nullable{int})"/>
     public Task<int> RecordCountAsync<T>(IDbConnection connection, string conditions = "", object? parameters = null, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, string, object?, IDbTransaction?, int?, Task<int>>>("RecordCountAsync:str", typeof(T))(connection, conditions, parameters, transaction, commandTimeout);
 
+    /// <inheritdoc cref="SimpleCRUD.RecordCountAsync{T}(IDbConnection, object, IDbTransaction, System.Nullable{int})"/>
     public Task<int> RecordCountAsync<T>(IDbConnection connection, object whereConditions, IDbTransaction? transaction = null, int? commandTimeout = null) =>
         Bind<Func<IDbConnection, object, IDbTransaction?, int?, Task<int>>>("RecordCountAsync:obj", typeof(T))(connection, whereConditions, transaction, commandTimeout);
 
@@ -238,6 +268,31 @@ public sealed class SimpleCrudEngine
         Add("Update", "Update", 1, conn, G, tx, timeout);
         Add("UpdateAsync", "UpdateAsync", 1, conn, G, tx, timeout, typeof(CancellationToken?));
         return map;
+    }
+
+    /// <summary>
+    /// <see cref="Describe(Type)"/> reads a few of SimpleCRUD's private helpers. Check they exist when the
+    /// engine is created, so an incompatible SimpleCRUD fails at startup with a clear message rather than
+    /// in the middle of a request.
+    /// </summary>
+    internal static void VerifyMetadataMembers(Type crud)
+    {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+        var missing = new List<string>();
+        if (crud.GetMethod("GetTableName", flags, null, [typeof(Type)], null) is null) missing.Add("GetTableName(Type)");
+        if (crud.GetMethod("GetColumnName", flags, null, [typeof(PropertyInfo)], null) is null) missing.Add("GetColumnName(PropertyInfo)");
+        if (crud.GetMethod("GetIdProperties", flags, null, [typeof(Type)], null) is null) missing.Add("GetIdProperties(Type)");
+        foreach (var generic in new[] { "GetScaffoldableProperties", "GetUpdateableProperties", "BuildInsertParameters" })
+        {
+            if (crud.GetMethods(flags).All(m => m.Name != generic || !m.IsGenericMethodDefinition)) missing.Add(generic + "<T>");
+        }
+
+        if (missing.Count > 0)
+        {
+            throw new NotSupportedException(
+                $"This version of Dapper.SimpleCRUD ({crud.Assembly.GetName().Version}) is not supported by EzOdata.SimpleCrud: " +
+                $"missing {string.Join(", ", missing)}. Supported: 2.3.x and 2.4.x.");
+        }
     }
 
     private static MethodInfo Find(Type crud, string name, int arity, Type[] parameterTypes)
