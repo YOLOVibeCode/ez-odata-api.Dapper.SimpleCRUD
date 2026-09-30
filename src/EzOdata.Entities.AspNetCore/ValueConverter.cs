@@ -2,7 +2,7 @@ using System.Globalization;
 using EzOdata.Core;
 using EzOdata.Core.Query;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>Engine values (typed by EDM type) → entity property types.</summary>
 internal static class ValueConverter

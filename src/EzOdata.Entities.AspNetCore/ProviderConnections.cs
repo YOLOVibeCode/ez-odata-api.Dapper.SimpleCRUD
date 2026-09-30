@@ -1,5 +1,5 @@
+using System.Data;
 using System.Data.Common;
-using Dapper;
 using EzOdata.Connectors.Abstractions;
 using EzOdata.Core;
 using EzOdata.Core.Query;
@@ -9,22 +9,19 @@ using Microsoft.Data.Sqlite;
 using MySqlConnector;
 using Npgsql;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>
-/// Connector type → SimpleCRUD dialect, ADO.NET connection, and error taxonomy. Connection settings
+/// Connector type → ADO.NET connection, isolation, and error taxonomy. Connection settings
 /// mirror ez-odata's own connectors (whose builders are internal to those packages).
 /// </summary>
 internal static class ProviderConnections
 {
-    public static SimpleCRUD.Dialect DialectFor(string connectorType) => connectorType switch
+    public static IsolationLevel IsolationFor(string connectorType, bool guarded)
     {
-        ConnectorTypes.Sqlite => SimpleCRUD.Dialect.SQLite,
-        ConnectorTypes.PostgreSql => SimpleCRUD.Dialect.PostgreSQL,
-        ConnectorTypes.MySql => SimpleCRUD.Dialect.MySQL,
-        ConnectorTypes.SqlServer => SimpleCRUD.Dialect.SQLServer,
-        _ => throw new NotSupportedException($"No SimpleCRUD dialect for connector '{connectorType}'."),
-    };
+        if (!guarded) return IsolationLevel.Unspecified;
+        return connectorType == ConnectorTypes.PostgreSql ? IsolationLevel.RepeatableRead : IsolationLevel.Serializable;
+    }
 
     public static DbConnection Create(string connectorType, ConnectionSpec spec) => connectorType switch
     {
@@ -44,7 +41,7 @@ internal static class ProviderConnections
             Database = spec.Database,
             UserID = spec.Username,
             Password = spec.Password,
-            ApplicationName = "ez-odata-api+simplecrud",
+            ApplicationName = "ez-odata-api+entities",
             SslMode = spec.Tls.Mode switch
             {
                 "disable" => MySqlSslMode.None,
@@ -61,7 +58,7 @@ internal static class ProviderConnections
             InitialCatalog = spec.Database,
             UserID = spec.Username,
             Password = spec.Password,
-            ApplicationName = "ez-odata-api+simplecrud",
+            ApplicationName = "ez-odata-api+entities",
             Encrypt = spec.Tls.Mode != "disable",
             TrustServerCertificate = spec.Tls.AllowInvalid,
         }.ConnectionString),
@@ -77,7 +74,7 @@ internal static class ProviderConnections
             Database = spec.Database,
             Username = spec.Username,
             Password = spec.Password,
-            ApplicationName = "ez-odata-api+simplecrud",
+            ApplicationName = "ez-odata-api+entities",
             SslMode = spec.Tls.Mode switch
             {
                 "disable" => SslMode.Disable,

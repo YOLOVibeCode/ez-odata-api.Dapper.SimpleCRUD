@@ -1,10 +1,10 @@
+using System.Data;
 using System.Data.Common;
 using EzOdata.Connectors.Abstractions;
 using EzOdata.Connectors.Abstractions.Sql;
 using EzOdata.Core.Query;
-using EzOdata.SimpleCrud;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>
 /// Reads inside the write's transaction using ez-odata's own compiler and row reader, so results have
@@ -14,14 +14,14 @@ internal sealed class WriteToolkit
 {
     private readonly SqlCompiler _compiler;
     private readonly DbConnection _connection;
-    private readonly SimpleCrudSession _session;
+    private readonly IDbTransaction? _transaction;
     private readonly CancellationToken _ct;
 
-    public WriteToolkit(ISqlDialect dialect, DbConnection connection, SimpleCrudSession session, CancellationToken ct)
+    public WriteToolkit(ISqlDialect dialect, DbConnection connection, IDbTransaction? transaction, CancellationToken ct)
     {
         _compiler = new SqlCompiler(dialect);
         _connection = connection;
-        _session = session;
+        _transaction = transaction;
         _ct = ct;
     }
 
@@ -35,7 +35,7 @@ internal sealed class WriteToolkit
             Top = 1,
         });
 
-        using var command = AdoQueryExecutor.Build(_connection, (DbTransaction?)_session.Transaction, compiled, execution.Options);
+        using var command = AdoQueryExecutor.Build(_connection, (DbTransaction?)_transaction, compiled, execution.Options);
         using var reader = await command.ExecuteReaderAsync(_ct);
         return await reader.ReadAsync(_ct) ? AdoQueryExecutor.ReadRow(reader) : null;
     }
@@ -49,7 +49,7 @@ internal sealed class WriteToolkit
             Filter = EzFilter.And(KeyFilter(key), predicate),
         });
 
-        using var command = AdoQueryExecutor.Build(_connection, (DbTransaction?)_session.Transaction, compiled, execution.Options);
+        using var command = AdoQueryExecutor.Build(_connection, (DbTransaction?)_transaction, compiled, execution.Options);
         return Convert.ToInt64(await command.ExecuteScalarAsync(_ct)) > 0;
     }
 

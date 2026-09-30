@@ -4,6 +4,7 @@ using System.Text.Json;
 using Dapper;
 using EzOdata.AspNetCore;
 using EzOdata.AspNetCore.Embedded;
+using EzOdata.Entities.AspNetCore;
 using EzOdata.SimpleCrud;
 using EzOdata.SimpleCrud.AspNetCore;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -30,7 +31,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Environme
 builder.Logging.ClearProviders();
 builder.WebHost.UseUrls("http://127.0.0.1:0");
 builder.Services.AddEzOData(ez => { ez.AddService("shop", s => s.UseSqlite(db)); ez.AllowAnonymousInDevelopment(); });
-builder.Services.ExtendEzOData(x => x.Service("shop", shop => shop.Table<Widget>(t => t
+builder.Services.ExtendEzOData(x => x.Service("shop", shop => shop.UseSimpleCrud().Table<Widget>(t => t
     .BeforeInsert((w, ctx) => { if (string.IsNullOrWhiteSpace(w.Name)) ctx.Reject("name is required"); w.CreatedBy = "smoke"; }))));
 var app = builder.Build();
 app.MapEzOData("/api/odata");

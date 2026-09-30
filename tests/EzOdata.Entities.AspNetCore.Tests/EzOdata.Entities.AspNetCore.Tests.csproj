@@ -18,6 +18,7 @@
     <PackageReference Include="Testcontainers.MySql" Version="4.1.0" />
     <PackageReference Include="Testcontainers.MsSql" Version="4.1.0" />
     <ProjectReference Include="..\..\src\EzOdata.SimpleCrud.AspNetCore\EzOdata.SimpleCrud.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\EzOdata.EntityFrameworkCore.AspNetCore\EzOdata.EntityFrameworkCore.AspNetCore.csproj" />
     <Compile Include="..\Shared\*.cs" LinkBase="Shared" />
   </ItemGroup>
 

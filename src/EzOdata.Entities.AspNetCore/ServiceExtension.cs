@@ -1,11 +1,9 @@
 using System.Data.Common;
 using System.Runtime.CompilerServices;
-using Dapper;
 using EzOdata.Connectors.Abstractions;
 using EzOdata.Core.Schema;
-using EzOdata.SimpleCrud;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>Configuration for one extended ez-odata service, plus its per-schema models.</summary>
 internal sealed class ServiceExtension
@@ -19,7 +17,10 @@ internal sealed class ServiceExtension
 
     public string Name { get; }
     public Func<ConnectionSpec, DbConnection>? ConnectionFactory { get; set; }
-    public SimpleCrudNaming? Naming { get; set; }
+    public IEntityEngine? Engine { get; set; }
+
+    /// <summary>Engine-package extras (e.g. SimpleCRUD naming).</summary>
+    public Dictionary<string, object?> Items { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Expose entity property names (not column names) for entity-mapped tables.</summary>
     public bool UsePropertyNames { get; set; }
@@ -51,25 +52,26 @@ internal sealed record BoundTable(TableRegistration Registration, EntityBinding 
 internal sealed class ServiceModel
 {
     private readonly Dictionary<string, BoundTable> _byTable;
-    private ISimpleCrud? _client;
+    private readonly Dictionary<Type, EntityMap> _maps;
+    private IEntityStore? _readStore;
 
-    private ServiceModel(ServiceExtension extension, ServiceRuntime runtime, SimpleCRUD.Dialect dialect, SimpleCrudEngine engine,
-        SchemaSnapshot schema, Dictionary<string, BoundTable> byTable)
+    private ServiceModel(ServiceExtension extension, ServiceRuntime runtime, IEntityEngine engine,
+        SchemaSnapshot schema, Dictionary<string, BoundTable> byTable, Dictionary<Type, EntityMap> maps)
     {
         Extension = extension;
         Runtime = runtime;
-        Dialect = dialect;
         Engine = engine;
         Schema = schema;
         _byTable = byTable;
+        _maps = maps;
     }
 
     public ServiceExtension Extension { get; }
     public ServiceRuntime Runtime { get; }
-    public SimpleCRUD.Dialect Dialect { get; }
-    public SimpleCrudEngine Engine { get; }
+    public IEntityEngine Engine { get; }
     public SchemaSnapshot Schema { get; }
     public IReadOnlyCollection<BoundTable> BoundTables => _byTable.Values;
+    public IReadOnlyDictionary<Type, EntityMap> Maps => _maps;
 
     public BoundTable? Find(string table) => _byTable.TryGetValue(table, out var bound) ? bound : null;
 
@@ -77,29 +79,29 @@ internal sealed class ServiceModel
         Extension.ConnectionFactory?.Invoke(Runtime.Connection)
         ?? ProviderConnections.Create(Runtime.ConnectorType, Runtime.Connection);
 
-    /// <summary>A connection-per-call SimpleCRUD client on this service's engine (for hooks during reads).</summary>
-    public ISimpleCrud Client => _client ??= Extension.Naming is { } naming
-        ? SimpleCrud.For(Dialect).WithNaming(naming).WithConnection(CreateConnection).Build()
-        : SimpleCrud.For(Dialect).WithConnection(CreateConnection).Build();
+    public IEntityStore ReadStore(IServiceProvider services) =>
+        _readStore ??= new LazyReadStore(this, services);
 
     public static ServiceModel Build(ServiceExtension extension, ServiceRuntime runtime)
     {
-        var dialect = ProviderConnections.DialectFor(runtime.ConnectorType);
-        var engine = SimpleCrudEngines.For(dialect, extension.Naming);
-        var caseSensitive = runtime.ConnectorType == Core.Services.ConnectorTypes.PostgreSql; // SimpleCRUD quotes identifiers
+        var engine = extension.Engine
+            ?? throw new InvalidOperationException(
+                $"Service '{extension.Name}' has no write engine. Call UseSimpleCrud() or UseEfCore<TContext>() on the service builder.");
+
+        var caseSensitive = runtime.ConnectorType == Core.Services.ConnectorTypes.PostgreSql;
         var errors = new List<string>();
-        var bound = new List<(TableRegistration Registration, SimpleCrudEntityInfo Info, TableModel Table, Dictionary<string, SimpleCrudPropertyInfo> ByColumn)>();
+        var bound = new List<(TableRegistration Registration, EntityMap Map, TableModel Table, Dictionary<string, EntityPropertyMap> ByColumn)>();
 
         foreach (var registration in extension.Tables)
         {
-            var info = engine.Describe(registration.EntityType);
+            var map = engine.Map(registration.EntityType, runtime);
             var entity = registration.EntityType.Name;
 
-            var table = Match(runtime.Schema.Tables.Where(t => info.Schema is null || string.Equals(t.DbSchema, info.Schema, StringComparison.OrdinalIgnoreCase)),
-                t => t.DbName, info.TableName, caseSensitive, out var tableError);
+            var table = Match(runtime.Schema.Tables.Where(t => map.Schema is null || string.Equals(t.DbSchema, map.Schema, StringComparison.OrdinalIgnoreCase)),
+                t => t.DbName, map.TableName, caseSensitive, out var tableError);
             if (table is null)
             {
-                errors.Add($"{entity}: table {info.QuotedTableName} {tableError ?? "was not found in the database schema"} (service '{extension.Name}').");
+                errors.Add($"{entity}: table {map.QuotedTableName} {tableError ?? "was not found in the database schema"} (service '{extension.Name}').");
                 continue;
             }
 
@@ -109,31 +111,29 @@ internal sealed class ServiceModel
                 continue;
             }
 
-            var byColumn = new Dictionary<string, SimpleCrudPropertyInfo>(StringComparer.Ordinal);
-            foreach (var property in info.Properties)
+            var byColumn = new Dictionary<string, EntityPropertyMap>(StringComparer.Ordinal);
+            foreach (var property in map.Properties)
             {
                 var column = Match(table.Columns, c => c.DbName, property.ColumnName, caseSensitive, out var columnError);
                 if (column is null)
                 {
-                    errors.Add($"{entity}.{property.Property.Name}: column {property.QuotedColumnName} {columnError ?? $"does not exist in '{table.DbName}'"}.");
+                    errors.Add($"{entity}.{property.Property.Name}: column \"{property.ColumnName}\" {columnError ?? $"does not exist in '{table.DbName}'"}.");
                     continue;
                 }
 
                 byColumn[column.ExposedName] = property;
             }
 
-            if (!ValidateKeys(entity, info, table, byColumn, errors)) continue;
-            bound.Add((registration, info, table, byColumn));
+            if (!ValidateKeys(entity, map, table, byColumn, errors)) continue;
+            engine.Validate(map, table, byColumn, errors);
+            bound.Add((registration, map, table, byColumn));
         }
 
         if (errors.Count > 0) throw new EzExtensionConfigurationException(extension.Name, errors);
 
-        // Overlay 1: columns an entity cannot write become read-only (computed), so the engine rejects
-        // writes to them up front instead of SimpleCRUD silently dropping them.
-        // Overlay 2 (opt-in): API names become entity property names; SQL keeps using column names.
-        var renames = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal); // table → old → new
+        var renames = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         var replaced = new Dictionary<TableModel, TableModel>();
-        foreach (var (_, info, table, byColumn) in bound)
+        foreach (var (_, map, table, byColumn) in bound)
         {
             var rename = extension.UsePropertyNames
                 ? byColumn.Where(kv => kv.Key != kv.Value.Property.Name).ToDictionary(kv => kv.Key, kv => kv.Value.Property.Name, StringComparer.Ordinal)
@@ -142,7 +142,7 @@ internal sealed class ServiceModel
             var clashes = rename.Values.Where(n => table.Columns.Any(c => c.ExposedName == n && !rename.ContainsKey(c.ExposedName))).ToList();
             if (clashes.Count > 0)
             {
-                errors.Add($"{info.EntityType.Name}: property name(s) {string.Join(", ", clashes)} collide with other columns of '{table.ExposedName}'.");
+                errors.Add($"{map.EntityType.Name}: property name(s) {string.Join(", ", clashes)} collide with other columns of '{table.ExposedName}'.");
                 continue;
             }
 
@@ -166,7 +166,6 @@ internal sealed class ServiceModel
 
         if (errors.Count > 0) throw new EzExtensionConfigurationException(extension.Name, errors);
 
-        // Foreign keys name columns by their API names on both ends; keep every table consistent.
         string Renamed(string table, string column) =>
             renames.TryGetValue(table, out var map) && map.TryGetValue(column, out var n) ? n : column;
         var tables = runtime.Schema.Tables.Select(t =>
@@ -184,44 +183,39 @@ internal sealed class ServiceModel
         }).ToList();
 
         var schema = runtime.Schema with { Tables = tables };
+        var maps = new Dictionary<Type, EntityMap>();
         var byTable = bound.ToDictionary(
             b => b.Table.ExposedName,
             b =>
             {
                 var rename = renames[b.Table.ExposedName];
                 var byApiName = b.ByColumn.ToDictionary(kv => rename.TryGetValue(kv.Key, out var n) ? n : kv.Key, kv => kv.Value, StringComparer.Ordinal);
-                return new BoundTable(b.Registration, new EntityBinding(b.Info, schema.FindTable(b.Table.ExposedName)!, byApiName));
+                maps[b.Map.EntityType] = b.Map;
+                return new BoundTable(b.Registration, new EntityBinding(b.Map, schema.FindTable(b.Table.ExposedName)!, byApiName));
             },
             StringComparer.Ordinal);
 
-        return new ServiceModel(extension, runtime, dialect, engine, schema, byTable);
+        return new ServiceModel(extension, runtime, engine, schema, byTable, maps);
     }
 
     private static readonly HashSet<Type> InsertableKeyTypes =
         [typeof(int), typeof(long), typeof(short), typeof(uint), typeof(ulong), typeof(ushort), typeof(Guid), typeof(string)];
 
-    private static bool ValidateKeys(string entity, SimpleCrudEntityInfo info, TableModel table,
-        Dictionary<string, SimpleCrudPropertyInfo> byColumn, List<string> errors)
+    private static bool ValidateKeys(string entity, EntityMap map, TableModel table,
+        Dictionary<string, EntityPropertyMap> byColumn, List<string> errors)
     {
         var keyColumns = byColumn.Where(kv => kv.Value.IsKey).Select(kv => kv.Key).ToList();
-        if (info.Keys.Count == 0 || keyColumns.Count != info.Keys.Count
+        if (map.Keys.Count == 0 || keyColumns.Count != map.Keys.Count
             || !new HashSet<string>(keyColumns, StringComparer.Ordinal).SetEquals(table.PrimaryKey))
         {
-            errors.Add($"{entity}: key properties ({string.Join(", ", info.Keys.Select(k => k.Property.Name))}) must map exactly to the primary key of '{table.ExposedName}' ({string.Join(", ", table.PrimaryKey)}).");
+            errors.Add($"{entity}: key properties ({string.Join(", ", map.Keys.Select(k => k.Property.Name))}) must map exactly to the primary key of '{table.ExposedName}' ({string.Join(", ", table.PrimaryKey)}).");
             return false;
         }
 
-        var firstKeyType = Nullable.GetUnderlyingType(info.Keys[0].Property.PropertyType) ?? info.Keys[0].Property.PropertyType;
+        var firstKeyType = Nullable.GetUnderlyingType(map.Keys[0].Property.PropertyType) ?? map.Keys[0].Property.PropertyType;
         if (!InsertableKeyTypes.Contains(firstKeyType))
         {
-            errors.Add($"{entity}: SimpleCRUD inserts support int/long/short/Guid/string keys, not {firstKeyType.Name}.");
-            return false;
-        }
-
-        // SimpleCRUD only inserts a composite key's parts when they are client-supplied ([Required], Guid or string).
-        if (info.Keys.Count > 1 && info.Keys.FirstOrDefault(k => !k.IsInsertable) is { } missing)
-        {
-            errors.Add($"{entity}: composite key part {missing.Property.Name} must be [Required] so SimpleCRUD inserts it.");
+            errors.Add($"{entity}: keys of type {firstKeyType.Name} are not supported (use int/long/short/Guid/string).");
             return false;
         }
 
@@ -241,20 +235,86 @@ internal sealed class ServiceModel
 
         if (loose.Count > 1)
         {
-            // Same name in several schemas: prefer the engine's default schema.
             var preferred = loose.OfType<TableModel>().Where(t => t.DbSchema is "" or "public" or "dbo" or "main").ToList();
             if (preferred.Count == 1) return preferred[0] as TItem;
-            error = $"is ambiguous ({loose.Count} matches); set [Table(Schema = ...)]";
+            error = $"is ambiguous ({loose.Count} matches); set a schema on the entity mapping";
             return null;
         }
 
         if (caseSensitive)
         {
-            error = $"differs only by case from '{name(loose[0])}' (PostgreSQL identifiers are case-sensitive when quoted, as SimpleCRUD does)";
+            error = $"differs only by case from '{name(loose[0])}' (PostgreSQL identifiers are case-sensitive when quoted)";
             return null;
         }
 
         return loose[0];
+    }
+
+    /// <summary>Opens a short-lived store per call (for read-hook side writes that are not in a write transaction).</summary>
+    private sealed class LazyReadStore(ServiceModel model, IServiceProvider services) : IEntityStore
+    {
+        public DbConnection Connection => throw new InvalidOperationException("The read-side store opens a connection per call.");
+        public System.Data.IDbTransaction? Transaction => null;
+
+        public async Task<T?> GetAsync<T>(object key) where T : class
+        {
+            await using var store = await Open();
+            return await store.GetAsync<T>(key);
+        }
+
+        public async Task<object?> InsertAsync<T>(T entity) where T : class
+        {
+            await using var store = await Open();
+            var result = await store.InsertAsync(entity);
+            store.Commit();
+            return result;
+        }
+
+        public async Task<int> UpdateAsync<T>(T entity, T? original = null) where T : class
+        {
+            await using var store = await Open();
+            var result = await store.UpdateAsync(entity, original);
+            store.Commit();
+            return result;
+        }
+
+        public async Task<int> DeleteAsync<T>(T entity) where T : class
+        {
+            await using var store = await Open();
+            var result = await store.DeleteAsync(entity);
+            store.Commit();
+            return result;
+        }
+
+        public void Commit() { }
+        public void Rollback() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        private async Task<IEntityStore> Open()
+        {
+            var connection = model.CreateConnection();
+            await connection.OpenAsync();
+            var request = new EntityStoreRequest(model.Runtime, connection, services, model.Maps);
+            var store = await model.Engine.OpenStoreAsync(request, System.Data.IsolationLevel.Unspecified, CancellationToken.None);
+            return new OwningStore(store, connection);
+        }
+
+        private sealed class OwningStore(IEntityStore inner, DbConnection connection) : IEntityStore
+        {
+            public DbConnection Connection => inner.Connection;
+            public System.Data.IDbTransaction? Transaction => inner.Transaction;
+            public Task<T?> GetAsync<T>(object key) where T : class => inner.GetAsync<T>(key);
+            public Task<object?> InsertAsync<T>(T entity) where T : class => inner.InsertAsync(entity);
+            public Task<int> UpdateAsync<T>(T entity, T? original = null) where T : class => inner.UpdateAsync(entity, original);
+            public Task<int> DeleteAsync<T>(T entity) where T : class => inner.DeleteAsync(entity);
+            public void Commit() => inner.Commit();
+            public void Rollback() => inner.Rollback();
+            public async ValueTask DisposeAsync()
+            {
+                await inner.DisposeAsync();
+                await connection.DisposeAsync();
+            }
+        }
     }
 }
 
@@ -263,9 +323,9 @@ internal sealed class EntityBinding
 {
     private readonly Dictionary<string, string> _columnByProperty;
 
-    public EntityBinding(SimpleCrudEntityInfo info, TableModel table, Dictionary<string, SimpleCrudPropertyInfo> byColumn)
+    public EntityBinding(EntityMap map, TableModel table, Dictionary<string, EntityPropertyMap> byColumn)
     {
-        Info = info;
+        Map = map;
         Table = table;
         ByColumn = byColumn;
         KeyColumns = table.PrimaryKey;
@@ -273,13 +333,13 @@ internal sealed class EntityBinding
         _columnByProperty = byColumn.ToDictionary(kv => kv.Value.Property.Name, kv => kv.Key, StringComparer.Ordinal);
     }
 
-    public SimpleCrudEntityInfo Info { get; }
+    public EntityMap Map { get; }
     public TableModel Table { get; }
-    public IReadOnlyDictionary<string, SimpleCrudPropertyInfo> ByColumn { get; }
+    public IReadOnlyDictionary<string, EntityPropertyMap> ByColumn { get; }
 
     /// <summary>Primary key columns (API names), aligned with <see cref="Keys"/>.</summary>
     public IReadOnlyList<string> KeyColumns { get; }
-    public IReadOnlyList<SimpleCrudPropertyInfo> Keys { get; }
+    public IReadOnlyList<EntityPropertyMap> Keys { get; }
     public bool IsComposite => Keys.Count > 1;
 
     public string? ColumnForProperty(string propertyName) => _columnByProperty.TryGetValue(propertyName, out var c) ? c : null;
@@ -290,7 +350,7 @@ public sealed class EzExtensionConfigurationException : InvalidOperationExceptio
 {
     /// <summary>Creates the exception listing every mismatch found for <paramref name="service"/>.</summary>
     public EzExtensionConfigurationException(string service, IReadOnlyList<string> problems)
-        : base($"ez-odata SimpleCRUD extension for service '{service}' does not match the database:{Environment.NewLine} - "
+        : base($"ez-odata entity extension for service '{service}' does not match the database:{Environment.NewLine} - "
                + string.Join(Environment.NewLine + " - ", problems))
     {
         Problems = problems;

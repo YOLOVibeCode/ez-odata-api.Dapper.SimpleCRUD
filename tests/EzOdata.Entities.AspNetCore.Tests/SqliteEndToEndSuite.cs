@@ -3,22 +3,21 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Dapper;
 using EzOdata.Core.Policy;
+using EzOdata.Entities.AspNetCore;
 using EzOdata.SimpleCrud.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
 
-namespace EzOdata.SimpleCrud.AspNetCore.Tests;
+namespace EzOdata.Entities.AspNetCore.Tests;
 
-/// <summary>
-/// End to end through ez-odata's real HTTP pipeline (AddEzOData + MapEzOData, unmodified) with
-/// ExtendEzOData layered on. Every test gets a fresh SQLite database and host.
-/// </summary>
-public sealed class SqliteEndToEndTests : IAsyncLifetime
+public abstract class SqliteEndToEndSuite : IAsyncLifetime
 {
     private readonly TestDatabase _db = TestDatabase.NewSqlite();
     private IHost _host = null!;
+
+    protected abstract IEngineUnderTest Engine { get; }
 
     public async Task InitializeAsync()
     {
@@ -37,19 +36,22 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
             services =>
             {
                 services.AddSingleton<HookJournal>();
-                services.ExtendEzOData(x => x.Service("crm", crm => crm
-                    .Table<Customer, CustomerHandler>()
-                    .Table<Order>(t => t
-                        .BeforeInsert((o, ctx) => { if (o.Total <= 0) ctx.Reject("Order total must be positive."); })
-                        .AfterInsert(async (o, ctx) =>
-                        {
-                            await ctx.Crud.InsertAsync(new AuditLog { Entity = "order", EntityId = o.Id, Action = "insert", Actor = ctx.UserId });
-                            var journal = ctx.Services.GetRequiredService<HookJournal>();
-                            ctx.OnCommitted(() => { lock (journal) journal.Calls.Add($"committed:order:{o.Total}"); });
-                            if (o.Total == 77) ctx.OnCommitted(() => throw new InvalidOperationException("mail server down"));
-                            if (o.Total > 1000) ctx.Reject("Orders over 1000 need approval.");
-                        })
-                        .AfterRead((row, _) => { if (row["total"] is double d) row.Set("total", Math.Round(d, 1)); }))));
+                services.ExtendEzOData(x => x.Service("crm", crm =>
+                {
+                    Engine.Configure(crm);
+                    crm.Table<Customer, CustomerHandler>()
+                        .Table<Order>(t => t
+                            .BeforeInsert((o, ctx) => { if (o.Total <= 0) ctx.Reject("Order total must be positive."); })
+                            .AfterInsert(async (o, ctx) =>
+                            {
+                                await ctx.Data.InsertAsync(new AuditLog { Entity = "order", EntityId = o.Id, Action = "insert", Actor = ctx.UserId });
+                                var journal = ctx.Services.GetRequiredService<HookJournal>();
+                                ctx.OnCommitted(() => { lock (journal) journal.Calls.Add($"committed:order:{o.Total}"); });
+                                if (o.Total == 77) ctx.OnCommitted(() => throw new InvalidOperationException("mail server down"));
+                                if (o.Total > 1000) ctx.Reject("Orders over 1000 need approval.");
+                            })
+                            .AfterRead((row, _) => { if (row["total"] is double d) row.Set("total", Math.Round(d, 1)); }));
+                }));
             });
     }
 
@@ -76,8 +78,6 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
     private static HttpRequestMessage Patch(string url, object body) =>
         new(HttpMethod.Patch, url) { Content = JsonContent.Create(body) };
 
-    // ---- instant API is untouched --------------------------------------------------------------
-
     [Fact]
     public async Task Tables_without_an_entity_keep_the_stock_instant_api()
     {
@@ -91,8 +91,6 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
         Assert.Contains("EntityType Name=\"customers\"", metadata);
         Assert.Contains("EntityType Name=\"products\"", metadata);
     }
-
-    // ---- reads ---------------------------------------------------------------------------------
 
     [Fact]
     public async Task Reads_apply_role_row_filters_and_handler_filters_together()
@@ -110,13 +108,11 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
     {
         var body = await Json(await Admin.GetAsync("/api/odata/crm/customers?$filter=id eq 1&$expand=orders"));
         var orders = body.GetProperty("value")[0].GetProperty("orders");
-        Assert.Equal(10.3, orders[0].GetProperty("total").GetDouble()); // rounded by the Order AfterRead hook
+        Assert.Equal(10.3, orders[0].GetProperty("total").GetDouble());
     }
 
-    // ---- inserts -------------------------------------------------------------------------------
-
     [Fact]
-    public async Task Insert_runs_through_SimpleCRUD_and_the_handler()
+    public async Task Insert_runs_through_the_engine_and_the_handler()
     {
         var response = await Rep().PostAsJsonAsync("/api/odata/crm/customers",
             new { full_name = "Cy", email = "cy@example.com", country = "us", owner_id = "u1" });
@@ -124,8 +120,8 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var body = await Json(response);
         var id = body.GetProperty("id").GetInt32();
-        Assert.Equal("u1", body.GetProperty("created_by").GetString());   // stamped by BeforeInsert
-        Assert.Equal("US", body.GetProperty("country").GetString());      // normalized by BeforeInsert
+        Assert.Equal("u1", body.GetProperty("created_by").GetString());
+        Assert.Equal("US", body.GetProperty("country").GetString());
         Assert.Equal(1L, await Scalar<long>($"SELECT COUNT(*) FROM audit_log WHERE entity_id = {id} AND action = 'insert'"));
         Assert.Contains("crm:BeforeInsert:Cy", _host.Services.GetRequiredService<HookJournal>().Calls);
     }
@@ -148,8 +144,8 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("need approval", await response.Content.ReadAsStringAsync());
-        Assert.Equal(1L, await Scalar<long>("SELECT COUNT(*) FROM orders"));     // order rolled back
-        Assert.Equal(0L, await Scalar<long>("SELECT COUNT(*) FROM audit_log"));  // audit written in AfterInsert rolled back too
+        Assert.Equal(1L, await Scalar<long>("SELECT COUNT(*) FROM orders"));
+        Assert.Equal(0L, await Scalar<long>("SELECT COUNT(*) FROM audit_log"));
 
         var ok = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 99.0 });
         Assert.Equal(HttpStatusCode.Created, ok.StatusCode);
@@ -163,13 +159,12 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
 
         var rejected = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 5000.0 });
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
-        Assert.DoesNotContain("committed:order:5000", journal.Calls);  // registered, then rolled back: never runs
+        Assert.DoesNotContain("committed:order:5000", journal.Calls);
 
         var ok = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 42.0 });
         Assert.Equal(HttpStatusCode.Created, ok.StatusCode);
         Assert.Single(journal.Calls, c => c == "committed:order:42");
 
-        // A failing callback is logged; the committed write and its response stand.
         var flaky = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 77.0 });
         Assert.Equal(HttpStatusCode.Created, flaky.StatusCode);
         Assert.Equal(1L, await Scalar<long>("SELECT COUNT(*) FROM orders WHERE total = 77"));
@@ -196,8 +191,6 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Contains("Conflict.UniqueViolation", await response.Content.ReadAsStringAsync());
     }
-
-    // ---- updates -------------------------------------------------------------------------------
 
     [Fact]
     public async Task Patch_changes_only_what_was_sent()
@@ -226,13 +219,12 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
     public async Task Columns_the_entity_does_not_write_are_read_only_in_the_api()
     {
         var notes = await Admin.PostAsJsonAsync("/api/odata/crm/customers", new { full_name = "N", country = "US", notes = "x" });
-        Assert.Equal(HttpStatusCode.BadRequest, notes.StatusCode); // unmapped column
+        Assert.Equal(HttpStatusCode.BadRequest, notes.StatusCode);
 
         var createdBy = await Admin.SendAsync(Patch("/api/odata/crm/customers(1)", new { created_by = "mallory" }));
-        Assert.Equal(HttpStatusCode.BadRequest, createdBy.StatusCode); // [IgnoreUpdate]
+        Assert.Equal(HttpStatusCode.BadRequest, createdBy.StatusCode);
         Assert.Contains("cannot be changed", await createdBy.Content.ReadAsStringAsync());
 
-        // PUT: omitted [IgnoreUpdate] columns are fine, but a supplied value is rejected, never silently dropped.
         var put = new { full_name = "Ada", email = "ada@example.com", country = "US", owner_id = "u1", is_deleted = 0 };
         Assert.Equal(HttpStatusCode.OK, (await Admin.PutAsJsonAsync("/api/odata/crm/customers(1)", put)).StatusCode);
         var putCreatedBy = await Admin.PutAsJsonAsync("/api/odata/crm/customers(1)", new
@@ -253,62 +245,30 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
         Assert.Equal(0L, await Scalar<long>("SELECT is_deleted FROM customers WHERE id = 2"));
     }
 
-    // ---- delete override -----------------------------------------------------------------------
-
     [Fact]
     public async Task Delete_can_be_overridden_as_a_soft_delete()
     {
         var delete = await Admin.DeleteAsync("/api/odata/crm/customers(2)");
 
         Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
-        Assert.Equal(1L, await Scalar<long>("SELECT is_deleted FROM customers WHERE id = 2"));   // row kept
+        Assert.Equal(1L, await Scalar<long>("SELECT is_deleted FROM customers WHERE id = 2"));
         Assert.Equal(1L, await Scalar<long>("SELECT COUNT(*) FROM audit_log WHERE action = 'soft-delete' AND entity_id = 2"));
 
         Assert.Equal(HttpStatusCode.NotFound, (await Admin.GetAsync("/api/odata/crm/customers(2)")).StatusCode);
         var list = await Json(await Admin.GetAsync("/api/odata/crm/customers?$count=true"));
         Assert.Equal(1, list.GetProperty("@odata.count").GetInt32());
 
-        // Invisible rows are not writable either.
         Assert.Equal(HttpStatusCode.NotFound, (await Admin.SendAsync(Patch("/api/odata/crm/customers(2)", new { email = "z@example.com" }))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await Admin.DeleteAsync("/api/odata/crm/customers(2)")).StatusCode);
     }
 }
 
-/// <summary>Configuration errors surface at startup, with the exact problem.</summary>
-public sealed class StartupValidationTests
+public sealed class SimpleCrud_SqliteEndToEndTests : SqliteEndToEndSuite
 {
-    [Dapper.Table("customers")]
-    public class DriftedCustomer
-    {
-        [Dapper.Key, Dapper.Column("id")] public int Id { get; set; }
-        [Dapper.Column("nickname")] public string? Nickname { get; set; }
-    }
+    protected override IEngineUnderTest Engine => SimpleCrudEngineUnderTest.Instance;
+}
 
-    [Dapper.Table("no_such_table")]
-    public class Ghost
-    {
-        public int Id { get; set; }
-    }
-
-    [Fact]
-    public async Task An_entity_that_does_not_match_the_database_stops_startup()
-    {
-        var db = TestDatabase.NewSqlite();
-        await db.ExecuteAsync(Schema.Crm("sqlite"));
-
-        var ex = await Assert.ThrowsAsync<EzExtensionConfigurationException>(() => TestApp.StartAsync(
-            ez => ez.AddService("crm", s => s.UseSqlite(db.FilePath!)),
-            s => s.ExtendEzOData(x => x.Service("crm", crm => crm.Table<DriftedCustomer>().Table<Ghost>()))));
-
-        Assert.Contains(ex.Problems, p => p.Contains("\"nickname\"", StringComparison.Ordinal));
-        Assert.Contains(ex.Problems, p => p.Contains("\"no_such_table\"", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void ExtendEzOData_requires_AddEzOData_first()
-    {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            new ServiceCollection().ExtendEzOData(x => x.Service("crm", crm => crm.Table<Customer>())));
-        Assert.Contains("AddEzOData", ex.Message);
-    }
+public sealed class EfCore_SqliteEndToEndTests : SqliteEndToEndSuite
+{
+    protected override IEngineUnderTest Engine => EfCoreEngineUnderTest.Instance;
 }

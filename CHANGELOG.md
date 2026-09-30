@@ -3,7 +3,33 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [2.0.0] - 2026-09-30
+
+### Added
+- **`EzOdata.Entities.AspNetCore`**: engine-neutral table takeover (`ExtendEzOData`, `EzTableHandler<T>`,
+  `ctx.Data`, `IEntityEngine` / `IEntityStore` / `EntityMap`).
+- **`EzOdata.EntityFrameworkCore.AspNetCore`**: `.UseEfCore<TContext>()` — mapping from `DbContext.Model`,
+  writes on ez-odata's connection and transaction, startup guards, `ctx.DbContext<T>()`.
+- `.UseSimpleCrud()` on the service builder; `ctx.SimpleCrud()` / `ctx.Session()` as the SimpleCRUD escape hatch.
+- The same end-to-end suite runs against both engines.
+- `./compare.sh` (and `compare.command` / `compare.cmd`): tests, quick timings (or `--deep` BenchmarkDotNet),
+  and a side-by-side `report.html`.
+- `./demo-swagger.sh` / `demo-swagger.cmd`: look up Swagger, read two sample databases, time both.
+- Depends on ez-odata-api **1.0.6** (REST OpenAPI `servers[0].url` includes the prefix and service, so
+  Swagger UI "Try it out" hits the real paths).
+
+### Changed
+- Handler defaults call `ctx.Data` instead of SimpleCRUD. `UpdateAsync` receives the original row so PATCH
+  writes only changed columns.
+- `ExtendEzOData`, `EzTableHandler<T>` and `EzHookContext` move to `EzOdata.Entities.AspNetCore`.
+
+### Migration from 1.x
+1. Add `.UseSimpleCrud()` on each extended service (or `.UseEfCore<TContext>()`).
+2. `using EzOdata.Entities.AspNetCore` for `ExtendEzOData` / handlers / `EzFilter`.
+3. Replace `ctx.Crud` / `ctx.Session` with `ctx.Data` (or `ctx.SimpleCrud()`).
+4. If you overrode `UpdateAsync(entity, ctx)`, the signature is now `UpdateAsync(entity, original, ctx)`.
+
+The `EzOdata.SimpleCrud` facade is unchanged.
 
 ## [1.0.0] - 2026-09-30
 
@@ -34,6 +60,6 @@ All notable changes to this project are documented here. The format follows
   delete, composite keys, `UsePropertyNames()`, and startup validation of entities against the schema.
 - Depends on the ez-odata-api 1.0.5 packages from nuget.org.
 
-[Unreleased]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0...HEAD
+[2.0.0]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0-rc.1...v1.0.0
 [1.0.0-rc.1]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/releases/tag/v1.0.0-rc.1

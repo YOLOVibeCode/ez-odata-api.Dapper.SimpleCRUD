@@ -3,21 +3,25 @@
 [![CI](https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/actions/workflows/ci.yml/badge.svg)](https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/actions/workflows/ci.yml)
 [![EzOdata.SimpleCrud](https://img.shields.io/nuget/v/EzOdata.SimpleCrud?label=EzOdata.SimpleCrud)](https://www.nuget.org/packages/EzOdata.SimpleCrud)
 [![EzOdata.SimpleCrud.AspNetCore](https://img.shields.io/nuget/v/EzOdata.SimpleCrud.AspNetCore?label=EzOdata.SimpleCrud.AspNetCore)](https://www.nuget.org/packages/EzOdata.SimpleCrud.AspNetCore)
+[![EzOdata.Entities.AspNetCore](https://img.shields.io/nuget/v/EzOdata.Entities.AspNetCore?label=EzOdata.Entities.AspNetCore)](https://www.nuget.org/packages/EzOdata.Entities.AspNetCore)
+[![EzOdata.EntityFrameworkCore.AspNetCore](https://img.shields.io/nuget/v/EzOdata.EntityFrameworkCore.AspNetCore?label=EzOdata.EntityFrameworkCore.AspNetCore)](https://www.nuget.org/packages/EzOdata.EntityFrameworkCore.AspNetCore)
 
 ```bash
-dotnet add package EzOdata.SimpleCrud              # multi-dialect SimpleCRUD
-dotnet add package EzOdata.SimpleCrud.AspNetCore   # instant API + SimpleCRUD overrides
+dotnet add package EzOdata.SimpleCrud                        # multi-dialect SimpleCRUD
+dotnet add package EzOdata.SimpleCrud.AspNetCore             # instant API + SimpleCRUD engine
+dotnet add package EzOdata.EntityFrameworkCore.AspNetCore    # same API, EF Core engine
 ```
 
-This project adds Dapper.SimpleCRUD to [ez-odata-api](https://github.com/YOLOVibeCode/ez-odata-api)
-without changing ez-odata-api at all. It has two parts:
+This project adds interchangeable write engines to [ez-odata-api](https://github.com/YOLOVibeCode/ez-odata-api)
+without changing ez-odata-api at all:
 
 - **`EzOdata.SimpleCrud`**: an instance-based facade over [Dapper.SimpleCRUD](https://www.nuget.org/packages/Dapper.SimpleCRUD).
   Each dialect gets its own isolated SimpleCRUD engine, created on first use, so several databases
   and your existing SimpleCRUD code can run in one process.
-- **`EzOdata.SimpleCrud.AspNetCore`**: the DreamFactory model on top of ez-odata. You still get an
-  instant API for every table. You can then take over individual tables with SimpleCRUD entities and
-  typed hooks (validate, stamp, audit, soft delete, or replace an operation outright).
+- **`EzOdata.Entities.AspNetCore`**: the DreamFactory model on top of ez-odata. Instant API for every
+  table; take over individual tables with entities, typed hooks, and `ctx.Data`.
+- **`EzOdata.SimpleCrud.AspNetCore`** / **`EzOdata.EntityFrameworkCore.AspNetCore`**: pick the write
+  engine with one line per service (`.UseSimpleCrud()` or `.UseEfCore<TContext>()`).
 
 ez-odata-api is used unmodified. Its `AddEzOData` / `MapEzOData` calls stay exactly as documented.
 Design and requirements (each mapped to a test) are in [`specification.md`](specification.md).
@@ -33,13 +37,15 @@ builder.Services.AddEzOData(ez =>
     ez.UseHostRoles();
 });
 
-// 2. New: take over selected tables. Tables you don't list keep the stock instant API.
+// 2. Take over selected tables. One line picks the write engine.
 builder.Services.ExtendEzOData(x => x.Service("crm", crm => crm
+    .UseSimpleCrud()                                           // or .UseEfCore<CrmDbContext>()
     .Table<Customer, CustomerHandler>()                        // a handler class, created with DI
     .Table<Order>(t => t                                       // or inline hooks
         .BeforeInsert((o, ctx) => { if (o.Total <= 0) ctx.Reject("Total must be positive."); }))));
 
 app.MapEzOData("/api/odata");                                  // unchanged
+app.MapEzODataRest("/api/rest");                               // ez-odata 1.0.6: OpenAPI servers[0] includes prefix + service
 ```
 
 The entity is an ordinary SimpleCRUD class. Existing classes work as they are:
@@ -67,12 +73,12 @@ public sealed class CustomerHandler(IClock clock) : EzTableHandler<Customer>
     }
 
     public override Task AfterInsertAsync(Customer c, EzHookContext ctx) =>        // same transaction
-        ctx.Crud.InsertAsync(new AuditLog { Entity = "customer", EntityId = c.Id, Action = "insert" });
+        ctx.Data.InsertAsync(new AuditLog { Entity = "customer", EntityId = c.Id, Action = "insert" });
 
     public override Task<int> DeleteAsync(Customer c, EzHookContext ctx)          // soft delete
     {
         c.IsDeleted = true;
-        return ctx.Session!.UpdateAsync(c);
+        return ctx.Data.UpdateAsync(c);
     }
 }
 ```
@@ -106,20 +112,61 @@ builder.Services.ExtendEzOData(x => x.Service("crm", crm => crm
 SQL keeps using column names. Row filters and field rules use the API names, and foreign keys across
 tables are renamed consistently, so `$expand` keeps working.
 
+## Write engines
+
+Reads for taken-over tables stay on ez-odata's compiled SQL. Writes go through `IEntityEngine`:
+
+```csharp
+builder.Services.ExtendEzOData(x => x.Service("crm", crm => crm
+    .UseEfCore<CrmDbContext>()          // or .UseSimpleCrud()
+    .Table<Customer, CustomerHandler>()
+    .Table<Order>()));
+```
+
+| | SimpleCRUD | EF Core |
+|---|---|---|
+| Package | `EzOdata.SimpleCrud.AspNetCore` | `EzOdata.EntityFrameworkCore.AspNetCore` |
+| Registration | `.UseSimpleCrud()` | `.UseEfCore<TContext>()` |
+| Mapping | `engine.Describe` (attributes / naming) | `DbContext.Model` |
+| Writes | isolated `SimpleCrudSession` | `SaveChanges` on the shared connection + transaction |
+| Escape hatch | `ctx.SimpleCrud()` / `ctx.Session()` | `ctx.DbContext<TContext>()` |
+| Neutral store | `ctx.Data` | `ctx.Data` |
+
+EF Core startup refuses a retrying execution strategy (it conflicts with the extension's transactions),
+owned types, TPH/TPT/TPC, table splitting, and key types outside int/long/short/Guid/string. Value
+converters log a warning: they apply on writes; reads still use raw SQL.
+
+Migrating from 1.x: add `.UseSimpleCrud()`, `using EzOdata.Entities.AspNetCore`, and replace
+`ctx.Crud` / `ctx.Session` with `ctx.Data` (or `ctx.SimpleCrud()`).
+
+Compare both engines (tests + timings + a side-by-side HTML report):
+
+```bash
+./compare.sh                  # or double-click compare.command / compare.cmd
+./compare.sh --sqlite-only    # no Docker
+./compare.sh --deep           # BenchmarkDotNet in-process
+./demo-swagger.sh             # or demo-swagger.cmd: Swagger + read shop + warehouse + timings
+```
+
+Output lands in `artifacts/compare/<timestamp>/` (`tests/`, `bench/`, `report.html`).
+
+`demo-swagger.sh` starts the sample (two SQLite databases), prints each OpenAPI `servers[0].url`,
+reads `products` from shop and warehouse, then times both.
+
 ### Handler members
 
 | Member | When it runs | Default |
 |---|---|---|
 | `BeforeReadAsync(query, ctx)` | Before reads, `$count` and `$expand`, and before the existence check of an update or delete | Returns the query unchanged |
 | `AfterReadAsync(rows, ctx)` | After reads (not `$apply`) | Nothing |
-| `BeforeInsertAsync` / `InsertAsync` / `AfterInsertAsync` | POST | SimpleCRUD `InsertAsync` |
-| `BeforeUpdateAsync(entity, original)` / `UpdateAsync` / `AfterUpdateAsync` | PATCH / PUT | SimpleCRUD `UpdateAsync` |
-| `BeforeDeleteAsync` / `DeleteAsync` / `AfterDeleteAsync` | DELETE | SimpleCRUD `DeleteAsync` |
+| `BeforeInsertAsync` / `InsertAsync` / `AfterInsertAsync` | POST | `ctx.Data.InsertAsync` |
+| `BeforeUpdateAsync(entity, original)` / `UpdateAsync` / `AfterUpdateAsync` | PATCH / PUT | `ctx.Data.UpdateAsync` (PATCH writes only changed columns) |
+| `BeforeDeleteAsync` / `DeleteAsync` / `AfterDeleteAsync` | DELETE | `ctx.Data.DeleteAsync` |
 
 `EzHookContext` provides:
 - `User` / `UserId`
 - request-scoped `Services`
-- `Crud`, which is SimpleCRUD bound to the write's own connection and transaction
+- `Data`, the engine-neutral store on the write's own connection and transaction
 - `Column(nameof(Prop))`, which maps an entity property to its API column name
 - `Reject(msg)` (400) and `Forbid(msg)` (403); both roll back the write
 - `OnCommitted(...)`, for side effects that run once after the write commits
@@ -174,7 +221,7 @@ back to the single process-wide copy. `Shared(...)` never changes the global dia
 - The **connector registry** resolves that connector type to the stock connector wrapped by:
   - **Reads**: ez-odata's own compiled SQL (full `$filter`, `$expand`, `$apply`, `$count`, keyset
     paging), plus `BeforeRead` / `AfterRead`.
-  - **Writes** to entity tables: SimpleCRUD on the service's isolated engine, together with the
+  - **Writes** to entity tables: the configured engine (SimpleCRUD or EF Core) together with the
     handler, in one transaction. Tables without an entity use the stock writer.
 
 Hooks run **after** ez-odata's policy engine has applied role rules, row filters and field policies,
@@ -190,11 +237,11 @@ key, and PostgreSQL case-sensitivity. Any mismatch stops the app with a precise 
 
 ## Using ez-odata-api
 
-The packages depend on the published `EzOdata.*` packages on nuget.org (1.0.5), so a clone builds on
+The packages depend on the published `EzOdata.*` packages on nuget.org (1.0.6), so a clone builds on
 its own. To develop against a local ez-odata-api checkout instead:
 
 ```bash
-dotnet build -p:EzOdataSource=project                                  # uses ../ez-odata-api
+dotnet build -p:EzOdataSource=project                                  # ../ez-odata-api-1.0.6 if present, else ../ez-odata-api
 dotnet build -p:EzOdataSource=project -p:EzOdataRoot=/path/to/ez-odata-api/
 ```
 
@@ -203,19 +250,21 @@ dotnet build -p:EzOdataSource=project -p:EzOdataRoot=/path/to/ez-odata-api/
 | Trigger | What gets published |
 |---|---|
 | Push to `main` | `0.1.0-ci.N` prereleases to GitHub Packages |
-| Tag `vX.Y.Z` or `vX.Y.Z-rc.N` | `EzOdata.SimpleCrud` and `EzOdata.SimpleCrud.AspNetCore` to **nuget.org**, through trusted publishing (no stored API key), plus GitHub Packages and a GitHub Release |
+| Tag `vX.Y.Z` or `vX.Y.Z-rc.N` | `EzOdata.SimpleCrud`, `EzOdata.Entities.AspNetCore`, `EzOdata.SimpleCrud.AspNetCore` and `EzOdata.EntityFrameworkCore.AspNetCore` to **nuget.org**, through trusted publishing (no stored API key), plus GitHub Packages and a GitHub Release |
 
 ## Tests
 
 ```bash
 dotnet test                      # everything; Docker databases start automatically
 EZSC_SKIP_DOCKER=1 dotnet test   # SQLite only
+./compare.sh --sqlite-only       # tests + timings + report.html
+./demo-swagger.sh                # Swagger lookup, read two DBs, time both
 ```
 
 | Suite | Covers |
 |---|---|
-| `EzOdata.SimpleCrud.Tests` (22) | Engines are lazy singletons, and simultaneous first use creates exactly one. A test reproduces the upstream `SetDialect` stale-cache bug. An incompatible SimpleCRUD is rejected with a clear message. Each dialect emits its own SQL in one process, and the host's SimpleCRUD is untouched. Mapping is read from SimpleCRUD itself. Per-engine naming. Exceptions unwrapped. Delegates cached. Sessions and transactions. Keyed DI. Shared-mode guard. Overhead. **Real PostgreSQL, MySQL, SQL Server and SQLite, concurrently in one process.** |
-| `EzOdata.SimpleCrud.AspNetCore.Tests` (20) | Through ez-odata's real HTTP pipeline: stock tables untouched; role row filters combined with handler filters; `$expand` and `AfterRead`; inserts through SimpleCRUD and hooks; rejection returns 400 with rollback; hook side-writes roll back with the API write; insert outside the row filter returns 403; unique violation returns 409; PATCH changes only the fields sent; handler Forbid; read-only columns; row filters protect update and delete; soft delete; startup schema validation; composite keys; property-name exposure, including row filters and `$expand` across renamed keys; `OnCommitted` (runs once after commit, never after rollback). **One API serving four services on four database engines at once.** |
+| `EzOdata.SimpleCrud.Tests` | Isolated SimpleCRUD engines, naming, sessions, multi-database facade (unchanged in 2.0) |
+| `EzOdata.Entities.AspNetCore.Tests` | The same HTTP end-to-end, feature and multi-dialect suites run once for SimpleCRUD and once for EF Core. Engine-specific tests cover SimpleCRUD `[Required]` composite keys and naming, EF startup guards (retry / owned / TPH / key types / value-converter warning), and one escape hatch per engine. |
 
 CI runs both suites against Dapper.SimpleCRUD 2.3.0 and 2.4.0-beta1. Before publishing, it installs the
 exact packed `.nupkg` files into [`tests/Smoke`](tests/Smoke/Program.cs) and runs them.
@@ -228,6 +277,8 @@ are x86-only and crash under QEMU on Apple silicon, so on ARM hosts the tests us
 
 - Deep insert (nested POST) is not supported on entity-mapped tables, and a `$batch` changeset
   cannot mix entity-mapped and plain tables.
+- The MySQL EF provider is Pomelo 9 on EF Core 10 (NU1608). Swap to a 10.x Pomelo (or Oracle's
+  provider) when one ships.
 - Key types are limited to SimpleCRUD's own: int, long, short, Guid and string, including composite keys.
 - The facade reads a few of SimpleCRUD's private metadata methods. CI tests 2.3.0 and 2.4.0-beta1,
   and an incompatible version fails at startup with a clear message. Isolated engines need

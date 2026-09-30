@@ -3,13 +3,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
-/// <summary>Registration entry point: <c>services.ExtendEzOData(...)</c>.</summary>
-public static class EzODataSimpleCrudServiceCollectionExtensions
+/// <summary>Registers the entity-engine extension on top of <c>AddEzOData</c>.</summary>
+public static class EzODataEntityServiceCollectionExtensions
 {
     /// <summary>
-    /// Extend services registered by <c>AddEzOData(...)</c> with SimpleCRUD entities and hooks.
+    /// Extend services registered by <c>AddEzOData(...)</c> with entity-mapped tables and hooks.
     /// Call it after <c>AddEzOData</c>. It decorates ez-odata's registrations; nothing in ez-odata changes.
     /// </summary>
     public static IServiceCollection ExtendEzOData(this IServiceCollection services, Action<EzExtensionBuilder> configure)
@@ -17,7 +17,6 @@ public static class EzODataSimpleCrudServiceCollectionExtensions
         var builder = new EzExtensionBuilder();
         configure(builder);
 
-        // A second call merges into the first rather than decorating twice.
         if (services.FirstOrDefault(d => d.ServiceType == typeof(EzExtensionSet))?.ImplementationInstance is EzExtensionSet existing)
         {
             foreach (var pair in builder.Services) existing.Services[pair.Key] = pair.Value;
@@ -28,7 +27,7 @@ public static class EzODataSimpleCrudServiceCollectionExtensions
         services.AddSingleton(set);
         services.AddHttpContextAccessor();
 
-        Decorate<IServiceRuntimeResolver>(services, (sp, inner) => new ExtendedRuntimeResolver(inner, set));
+        Decorate<IServiceRuntimeResolver>(services, (sp, inner) => new ExtendedRuntimeResolver(inner, set, sp));
         Decorate<IConnectorRegistry>(services, (sp, inner) => new ExtendedConnectorRegistry(inner, set, sp));
         services.AddHostedService<ExtensionStartupValidator>();
         return services;
@@ -75,15 +74,21 @@ internal sealed class ExtensionStartupValidator(
             if (runtime is null)
             {
                 logger.LogWarning(
-                    "ez-odata SimpleCRUD extension: service '{Service}' is not available (not declared in AddEzOData, or introspection failed).",
+                    "ez-odata entity extension: service '{Service}' is not available (not declared in AddEzOData, or introspection failed).",
                     extension.Name);
                 continue;
             }
 
-            // Resolving through the decorated resolver already bound (and validated) the service.
             var model = extension.FindModel(runtime.Schema);
-            logger.LogInformation("ez-odata SimpleCRUD extension: service '{Service}' binds {Tables} table(s) on {Engine}.",
+            logger.LogInformation("ez-odata entity extension: service '{Service}' binds {Tables} table(s) on {Engine}.",
                 extension.Name, extension.Tables.Count, model?.Engine.Name);
+            if (model is not null)
+            {
+                foreach (var warning in model.Engine.Warnings)
+                {
+                    logger.LogWarning("ez-odata entity extension ({Service}): {Warning}", extension.Name, warning);
+                }
+            }
         }
     }
 
