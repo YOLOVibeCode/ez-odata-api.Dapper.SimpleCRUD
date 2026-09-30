@@ -85,6 +85,69 @@ public sealed class CustomerHandler(IClock clock) : EzTableHandler<Customer>
 
 A runnable version is in [`samples/EzOdata.SimpleCrud.Sample`](samples/EzOdata.SimpleCrud.Sample/Program.cs).
 
+## Browse and query your database in Swagger UI
+
+One line gives you a Swagger UI over every service:
+
+```csharp
+app.MapEzOData("/api/odata");
+app.MapEzODataRest("/api/rest");   // optional REST dialect
+app.UseEzODataSwaggerUI();         // Swagger UI at /swagger
+```
+
+Run your app and open **`https://localhost:<port>/swagger`**:
+
+![ez-odata Swagger UI: one group per table, a query guide built from your columns](docs/images/swagger-ui.png)
+
+1. **Pick a service and API** (top right). Every service you declared with `ez.AddService(...)` is listed,
+   on every API you mapped (OData v4 and REST), with nothing to configure.
+2. **Pick a table.** Operations are grouped by table, and the header shows query examples built from your
+   real columns.
+3. **Fill in the query options and click Execute.** "Try it out" is already on.
+
+   | Option | Example |
+   |---|---|
+   | `$filter` | `contains(full_name,'a') and country eq 'US'` |
+   | `$select` | `id,full_name` |
+   | `$orderby` | `full_name desc` |
+   | `$top` | `20` |
+   | `$count` | `true` |
+   | `$expand` | a related table, listed on the operation |
+
+   You get the request URL, a reusable `curl` command, and the rows from the database.
+
+`POST`, `PATCH` and `DELETE` work from the same page. On tables you've taken over, they go through your
+write engine and hooks, so a hook's `Reject(...)` shows up as the `400` response.
+
+**Options:**
+
+```csharp
+app.UseEzODataSwaggerUI(o =>
+{
+    o.RoutePrefix = "api-docs";                      // → /api-docs
+    o.DocumentTitle = "CRM API";
+    o.Services.Add("crm");                           // only these services (default: all)
+    o.ConfigureSwaggerUI = ui => ui.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
+});
+```
+
+**Authentication.** The page shows what the caller's role allows, because the OpenAPI documents are
+authorized like the data.
+- **Local development:** add `ez.AllowAnonymousInDevelopment()`.
+- **Cookie authentication** works as-is.
+- **Bearer tokens:** the browser's request for each document needs the token too. Add a request interceptor:
+
+  ```csharp
+  app.UseEzODataSwaggerUI(o => o.ConfigureSwaggerUI = ui => ui.UseRequestInterceptor(
+      "(req) => { const t = sessionStorage.getItem('apiToken'); if (t) req.headers['Authorization'] = 'Bearer ' + t; return req; }"));
+  ```
+
+  Then run `sessionStorage.setItem('apiToken', '<token>')` in the browser console and reload.
+
+Consider enabling it only outside production (`if (app.Environment.IsDevelopment()) app.UseEzODataSwaggerUI();`),
+or behind your own authorization policy. The sample serves it: `dotnet run --project samples/EzOdata.SimpleCrud.Sample`,
+then open http://localhost:5199/swagger.
+
 ## Extension levels
 
 Every level is opt-in. With none of them configured, you have exactly stock ez-odata.

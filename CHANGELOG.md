@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [SemVer](https://semver.org/).
 
+## [2.0.1] - 2026-09-30
+
+### Added
+- **Swagger UI in one line:** `app.UseEzODataSwaggerUI()` (from ez-odata-api 1.0.7) serves a styled Swagger
+  UI at `/swagger`. It lists every declared service on every mapped API, and "Try it out" is on by default.
+  The README has a new section, "Browse and query your database in Swagger UI", and the sample serves `/swagger`.
+
+### Changed
+- Depends on ez-odata-api **1.0.7**. Its OpenAPI documents group operations by table, read correctly
+  ("Create a row in customers"), declare by-key path parameters (so "Try it out" has an `{id}` input),
+  document the REST `resource` envelope, and include a query guide built from your columns.
+
 ## [2.0.0] - 2026-09-30
 
 ### Added
@@ -62,6 +74,7 @@ The `EzOdata.SimpleCrud` facade is unchanged.
   delete, composite keys, `UsePropertyNames()`, and startup validation of entities against the schema.
 - Depends on the ez-odata-api 1.0.5 packages from nuget.org.
 
+[2.0.1]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0-rc.1...v1.0.0
 [1.0.0-rc.1]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/releases/tag/v1.0.0-rc.1

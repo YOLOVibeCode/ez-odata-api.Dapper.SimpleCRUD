@@ -2,6 +2,7 @@
 // on both the OData and REST prefixes (ez-odata-api 1.0.6 server URLs).
 //
 //   dotnet run --project samples/EzOdata.SimpleCrud.Sample
+//   open http://localhost:5199/swagger   # browse and query both databases in Swagger UI
 //   ./demo-swagger.sh          # look up Swagger, read both DBs, time both
 //   curl http://localhost:5199/api/odata/shop/products
 //   curl http://localhost:5199/api/odata/warehouse/products
@@ -44,6 +45,7 @@ builder.Services.AddSimpleCrud("shop", SimpleCRUD.Dialect.SQLite, _ => new Sqlit
 var app = builder.Build();
 app.MapEzOData("/api/odata");
 app.MapEzODataRest("/api/rest");
+app.UseEzODataSwaggerUI();         // Swagger UI at /swagger: every service, OData + REST
 app.MapGet("/report", async ([FromKeyedServices("shop")] ISimpleCrud crud) => new
 {
     active = await crud.RecordCountAsync<Customer>(new { IsDeleted = false }),
