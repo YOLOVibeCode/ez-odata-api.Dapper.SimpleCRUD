@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <Description>Extend and override ez-odata-api's instant API with Dapper.SimpleCRUD entities and typed hooks — without modifying ez-odata-api.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\EzOdata.SimpleCrud\EzOdata.SimpleCrud.csproj" />
+  </ItemGroup>
+
+  <!-- ez-odata-api, consumed unmodified (see Directory.Build.props) -->
+  <ItemGroup Condition="'$(EzOdataSource)' == 'project'">
+    <ProjectReference Include="$(EzOdataRoot)src\EzOdata.AspNetCore\EzOdata.AspNetCore.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(EzOdataSource)' == 'package'">
+    <PackageReference Include="EzOdata.AspNetCore" Version="$(EzOdataVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EzOdata.SimpleCrud.AspNetCore.Tests" />
+  </ItemGroup>
+
+</Project>
