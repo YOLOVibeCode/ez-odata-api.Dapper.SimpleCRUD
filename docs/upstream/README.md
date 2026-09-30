@@ -1,12 +1,12 @@
 # Upstream contributions to Dapper.SimpleCRUD
 
-These are drafts for [ericdc1/Dapper.SimpleCRUD](https://github.com/ericdc1/Dapper.SimpleCRUD).
-Nothing here has been posted. Each item is small, and each was verified against `master`
+Contributions to [ericdc1/Dapper.SimpleCRUD](https://github.com/ericdc1/Dapper.SimpleCRUD). PR 1 is submitted as [#282](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/282).
+Each item is small, and each was verified against `master`
 (`62a5431`, 2026-08-21) and the released 2.3.0 package.
 
 ---
 
-## PR 1: rebuild cached names when the dialect or a resolver actually changes
+## PR 1: rebuild cached names when the dialect or a resolver actually changes ([#282](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/282))
 
 **Patch:** [`0001-SetDialect-clears-cached-names.patch`](0001-SetDialect-clears-cached-names.patch)
 (16 lines in `SimpleCRUD.cs` plus one test in `Tests.cs`, CRLF preserved, no public API change).

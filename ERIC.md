@@ -5,7 +5,7 @@ data layer small enough to understand in one sitting, and good enough to trust i
 know every issue and PR takes time from a project you maintain on your own, so I'll keep this short.
 **Nothing here needs anything from you.** It's a thank-you with a fix attached.
 
-## A small fix, verified: [PR #PR_NUMBER](https://github.com/ericdc1/Dapper.SimpleCRUD/pulls/rvegajr)
+## A small fix, verified: [PR #282](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/282)
 
 While building on SimpleCRUD, I found that `SetDialect` never clears the name caches
 (`TableNames`, `ColumnNames`, `StringBuilderCacheDict`). After the first query, switching dialects
