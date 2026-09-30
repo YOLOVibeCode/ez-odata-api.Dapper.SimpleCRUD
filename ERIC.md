@@ -1,5 +1,10 @@
 # Eric,
 
+## Why I did this
+
+Instead of the usual interview prep, I wanted to spend the time in your code. It seemed like an honest
+way to show how I work, and a better thank-you than words alone.
+
 Thank you for Dapper.SimpleCRUD. For more than ten years it has given a lot of us the rare thing: a
 data layer small enough to understand in one sitting, and good enough to trust in production. I
 know every issue and PR takes time from a project you maintain on your own, so I'll keep this short.
@@ -58,11 +63,6 @@ consultant through my company, Noctusoft.
 
 I mention it only so you know where I'm coming from. After enough years of heavy data layers, a
 library that stays small and does the common work well is something I appreciate.
-
-## Why I did this
-
-Instead of the usual interview prep, I wanted to spend the time in your code. It seemed like an honest
-way to show how I work, and a better thank-you than words alone.
 
 ## If it's helpful today
 
