@@ -1,7 +1,8 @@
 name: CI
 
 # Build + test on every push and PR (SQLite plus real PostgreSQL, MySQL and SQL Server via Testcontainers).
-# Pushes to main publish prerelease packages; v* tags publish releases (GitHub Packages + GitHub Release).
+# Pushes to main publish prerelease packages to GitHub Packages; v* tags publish releases to nuget.org
+# (trusted publishing, no stored API key), GitHub Packages and a GitHub Release.
 
 on:
   push:
@@ -66,6 +67,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write # nuget.org trusted publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
 
@@ -97,6 +99,20 @@ jobs:
           dotnet nuget push "artifacts/*.nupkg"
           --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
           --api-key "${{ secrets.GITHUB_TOKEN }}" --skip-duplicate
+
+      - name: Log in to nuget.org (trusted publishing)
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: rvegajr
+
+      - name: Push to nuget.org
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --source https://api.nuget.org/v3/index.json
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --skip-duplicate
 
       - uses: actions/upload-artifact@v4
         with:
