@@ -25,13 +25,13 @@ internal sealed class WriteToolkit
         _ct = ct;
     }
 
-    public async Task<Row?> ReadByKeyAsync(WriteExecution execution, EntityBinding binding, object? key)
+    public async Task<Row?> ReadByKeyAsync(WriteExecution execution, EntityBinding binding, IReadOnlyDictionary<string, object?> key)
     {
         var compiled = _compiler.CompileSelect(execution.Schema, new QueryRequest
         {
             ServiceName = execution.Write.ServiceName,
             Table = binding.Table.ExposedName,
-            Filter = EzFilter.Eq(binding.KeyColumn, key),
+            Filter = KeyFilter(key),
             Top = 1,
         });
 
@@ -40,16 +40,19 @@ internal sealed class WriteToolkit
         return await reader.ReadAsync(_ct) ? AdoQueryExecutor.ReadRow(reader) : null;
     }
 
-    public async Task<bool> ExistsAsync(WriteExecution execution, EntityBinding binding, object? key, FilterNode predicate)
+    public async Task<bool> ExistsAsync(WriteExecution execution, EntityBinding binding, IReadOnlyDictionary<string, object?> key, FilterNode predicate)
     {
         var compiled = _compiler.CompileCount(execution.Schema, new QueryRequest
         {
             ServiceName = execution.Write.ServiceName,
             Table = binding.Table.ExposedName,
-            Filter = EzFilter.And(EzFilter.Eq(binding.KeyColumn, key), predicate),
+            Filter = EzFilter.And(KeyFilter(key), predicate),
         });
 
         using var command = AdoQueryExecutor.Build(_connection, (DbTransaction?)_session.Transaction, compiled, execution.Options);
         return Convert.ToInt64(await command.ExecuteScalarAsync(_ct)) > 0;
     }
+
+    private static FilterNode KeyFilter(IReadOnlyDictionary<string, object?> key) =>
+        key.Aggregate((FilterNode?)null, (filter, pair) => EzFilter.And(filter, EzFilter.Eq(pair.Key, pair.Value)))!;
 }

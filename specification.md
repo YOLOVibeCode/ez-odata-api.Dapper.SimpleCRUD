@@ -126,6 +126,8 @@ app.MapEzOData("/api/odata");                                             // sto
 | X-9 | Values for restricted columns (`[IgnoreUpdate]`, `[IgnoreInsert]`, `[ReadOnly]`, unmapped) are rejected with 400, never silently dropped | `Columns_the_entity_does_not_write_are_read_only_in_the_api` |
 | X-10 | Entity and table mismatches (table, columns, key, PostgreSQL case-sensitivity) fail at startup | `An_entity_that_does_not_match_the_database_stops_startup` |
 | X-11 | Services on different dialects coexist in one host, each on its own engine | `Every_dialect_behind_one_api_in_one_process` |
+| X-12 | Composite primary keys, as SimpleCRUD models them (`[Key, Required]` parts): create, read, update, delete and conflicts by full key | `Composite_keys_work_end_to_end_through_SimpleCRUD` |
+| X-13 | `UsePropertyNames()`: entity property names become the API contract (payloads, `$filter`, `$orderby`, `$metadata`, row filters), with foreign keys renamed consistently across tables | `Entity_property_names_become_the_api_contract`, `Row_filters_and_expand_follow_the_renamed_columns` |
 
 ### 6.4 Consistency
 
@@ -150,14 +152,13 @@ small tables, and `SERIALIZABLE` elsewhere. Deadlocks and serialization failures
 |---|---|
 | Dialects | SQL Server, PostgreSQL, MySQL/MariaDB, SQLite. All four are exercised concurrently; the SQL Server tests use Azure SQL Edge on ARM |
 | Hosts | ASP.NET Core on .NET 10 (extension). The facade targets .NET 8+ (isolated) and netstandard2.0 (shared) |
-| Keys | int, long, short, Guid, string (single column) |
+| Keys | int, long, short, Guid, string, including composite keys (`[Key, Required]` parts) |
 
 ## 9. Limits and roadmap
 
 | Item | Plan |
 |---|---|
-| Composite keys and deep insert on entity tables; `$batch` mixing entity and plain tables | v1.1 |
-| Expose property names (not column names) as an opt-in per table | v1.1 |
+| Deep insert on entity tables; `$batch` mixing entity and plain tables | v1.1 |
 | .NET Framework 4.8 Web API host | Only after the ez-odata `EzOdata.WebApi` adapter is in use; the facade already targets netstandard2.0 |
 | MCP | Not part of ez's embedded package |
 | After hooks may re-run on a deadlock retry | Document, or add `ctx.OnCommitted(...)` for external side effects |
@@ -165,7 +166,7 @@ small tables, and `SERIALIZABLE` elsewhere. Deadlocks and serialization failures
 
 ## 10. Quality
 
-- 21 facade tests and 16 end-to-end tests. They run against real PostgreSQL 16, MySQL 8.4,
+- 21 facade tests and 19 end-to-end tests. They run against real PostgreSQL 16, MySQL 8.4,
   SQL Server (Azure SQL Edge) and SQLite via Testcontainers, and the full suite passed twice in a row.
 - Every requirement in §5–6 names its test.
 - Sample app: `samples/EzOdata.SimpleCrud.Sample`, verified over HTTP.

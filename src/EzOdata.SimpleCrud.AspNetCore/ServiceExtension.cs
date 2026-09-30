@@ -20,6 +20,9 @@ internal sealed class ServiceExtension
     public string Name { get; }
     public Func<ConnectionSpec, DbConnection>? ConnectionFactory { get; set; }
     public SimpleCrudNaming? Naming { get; set; }
+
+    /// <summary>Expose entity property names (not column names) for entity-mapped tables.</summary>
+    public bool UsePropertyNames { get; set; }
     public IReadOnlyCollection<TableRegistration> Tables => _tables.Values;
 
     public void Register(TableRegistration registration) => _tables[registration.EntityType] = registration;
@@ -85,7 +88,6 @@ internal sealed class ServiceModel
         var engine = SimpleCrudEngines.For(dialect, extension.Naming);
         var caseSensitive = runtime.ConnectorType == Core.Services.ConnectorTypes.PostgreSql; // SimpleCRUD quotes identifiers
         var errors = new List<string>();
-        var replaced = new Dictionary<TableModel, TableModel>();
         var bound = new List<(TableRegistration Registration, SimpleCrudEntityInfo Info, TableModel Table, Dictionary<string, SimpleCrudPropertyInfo> ByColumn)>();
 
         foreach (var registration in extension.Tables)
@@ -101,7 +103,7 @@ internal sealed class ServiceModel
                 continue;
             }
 
-            if (replaced.ContainsKey(table))
+            if (bound.Any(b => ReferenceEquals(b.Table, table)))
             {
                 errors.Add($"{entity}: table '{table.ExposedName}' is already mapped by another entity.");
                 continue;
@@ -120,56 +122,110 @@ internal sealed class ServiceModel
                 byColumn[column.ExposedName] = property;
             }
 
-            if (info.Keys.Count != 1 || table.PrimaryKey.Count != 1)
+            if (!ValidateKeys(entity, info, table, byColumn, errors)) continue;
+            bound.Add((registration, info, table, byColumn));
+        }
+
+        if (errors.Count > 0) throw new EzExtensionConfigurationException(extension.Name, errors);
+
+        // Overlay 1: columns an entity cannot write become read-only (computed), so the engine rejects
+        // writes to them up front instead of SimpleCRUD silently dropping them.
+        // Overlay 2 (opt-in): API names become entity property names; SQL keeps using column names.
+        var renames = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal); // table → old → new
+        var replaced = new Dictionary<TableModel, TableModel>();
+        foreach (var (_, info, table, byColumn) in bound)
+        {
+            var rename = extension.UsePropertyNames
+                ? byColumn.Where(kv => kv.Key != kv.Value.Property.Name).ToDictionary(kv => kv.Key, kv => kv.Value.Property.Name, StringComparer.Ordinal)
+                : new Dictionary<string, string>(StringComparer.Ordinal);
+
+            var clashes = rename.Values.Where(n => table.Columns.Any(c => c.ExposedName == n && !rename.ContainsKey(c.ExposedName))).ToList();
+            if (clashes.Count > 0)
             {
-                errors.Add($"{entity}: needs exactly one key property and a single-column primary key (entity keys: {info.Keys.Count}, table PK columns: {table.PrimaryKey.Count}). Composite keys are not supported yet.");
+                errors.Add($"{info.EntityType.Name}: property name(s) {string.Join(", ", clashes)} collide with other columns of '{table.ExposedName}'.");
                 continue;
             }
 
-            var keyColumn = byColumn.FirstOrDefault(kv => kv.Value.IsKey).Key;
-            if (keyColumn != table.PrimaryKey[0])
-            {
-                errors.Add($"{entity}: key property {info.Keys[0].Property.Name} maps to '{keyColumn}', but the table's primary key is '{table.PrimaryKey[0]}'.");
-                continue;
-            }
-
-            var keyType = Nullable.GetUnderlyingType(info.Keys[0].Property.PropertyType) ?? info.Keys[0].Property.PropertyType;
-            if (keyType != typeof(int) && keyType != typeof(long) && keyType != typeof(short) && keyType != typeof(uint)
-                && keyType != typeof(ulong) && keyType != typeof(ushort) && keyType != typeof(Guid) && keyType != typeof(string))
-            {
-                errors.Add($"{entity}: SimpleCRUD inserts support int/long/short/Guid/string keys, not {keyType.Name}.");
-                continue;
-            }
-
-            // Overlay: columns this entity cannot write become read-only (computed) in the API, so the
-            // engine rejects writes to them up front instead of SimpleCRUD silently dropping them.
+            string Name(string column) => rename.TryGetValue(column, out var n) ? n : column;
             var columns = table.Columns.Select(c =>
             {
-                if (c.IsPrimaryKey || c.IsComputed) return c;
-                var writable = byColumn.TryGetValue(c.ExposedName, out var p) && (p.IsInsertable || p.IsUpdatable);
-                return writable ? c : c with { IsComputed = true };
+                var writable = c.IsPrimaryKey || c.IsComputed
+                    || (byColumn.TryGetValue(c.ExposedName, out var p) && (p.IsInsertable || p.IsUpdatable));
+                var overlaid = writable || c.IsComputed ? c : c with { IsComputed = true };
+                return overlaid with { ExposedName = Name(c.ExposedName) };
             }).ToList();
 
-            replaced[table] = table with { Columns = columns };
-            bound.Add((registration, info, replaced[table], byColumn));
+            renames[table.ExposedName] = rename;
+            replaced[table] = table with
+            {
+                Columns = columns,
+                PrimaryKey = table.PrimaryKey.Select(Name).ToList(),
+                UniqueConstraints = table.UniqueConstraints.Select(u => (IReadOnlyList<string>)u.Select(Name).ToList()).ToList(),
+            };
         }
 
-        if (errors.Count > 0)
-        {
-            throw new EzExtensionConfigurationException(extension.Name, errors);
-        }
+        if (errors.Count > 0) throw new EzExtensionConfigurationException(extension.Name, errors);
 
-        var schema = runtime.Schema with
+        // Foreign keys name columns by their API names on both ends; keep every table consistent.
+        string Renamed(string table, string column) =>
+            renames.TryGetValue(table, out var map) && map.TryGetValue(column, out var n) ? n : column;
+        var tables = runtime.Schema.Tables.Select(t =>
         {
-            Tables = runtime.Schema.Tables.Select(t => replaced.TryGetValue(t, out var r) ? r : t).ToList(),
-        };
+            var current = replaced.TryGetValue(t, out var r) ? r : t;
+            if (renames.Count == 0 || current.ForeignKeys.Count == 0) return current;
+            return current with
+            {
+                ForeignKeys = current.ForeignKeys.Select(fk => fk with
+                {
+                    Columns = fk.Columns.Select(c => Renamed(t.ExposedName, c)).ToList(),
+                    RefColumns = fk.RefColumns.Select(c => Renamed(fk.RefTable, c)).ToList(),
+                }).ToList(),
+            };
+        }).ToList();
 
+        var schema = runtime.Schema with { Tables = tables };
         var byTable = bound.ToDictionary(
             b => b.Table.ExposedName,
-            b => new BoundTable(b.Registration, new EntityBinding(b.Info, b.Table, b.ByColumn)),
+            b =>
+            {
+                var rename = renames[b.Table.ExposedName];
+                var byApiName = b.ByColumn.ToDictionary(kv => rename.TryGetValue(kv.Key, out var n) ? n : kv.Key, kv => kv.Value, StringComparer.Ordinal);
+                return new BoundTable(b.Registration, new EntityBinding(b.Info, schema.FindTable(b.Table.ExposedName)!, byApiName));
+            },
             StringComparer.Ordinal);
 
         return new ServiceModel(extension, runtime, dialect, engine, schema, byTable);
+    }
+
+    private static readonly HashSet<Type> InsertableKeyTypes =
+        [typeof(int), typeof(long), typeof(short), typeof(uint), typeof(ulong), typeof(ushort), typeof(Guid), typeof(string)];
+
+    private static bool ValidateKeys(string entity, SimpleCrudEntityInfo info, TableModel table,
+        Dictionary<string, SimpleCrudPropertyInfo> byColumn, List<string> errors)
+    {
+        var keyColumns = byColumn.Where(kv => kv.Value.IsKey).Select(kv => kv.Key).ToList();
+        if (info.Keys.Count == 0 || keyColumns.Count != info.Keys.Count
+            || !new HashSet<string>(keyColumns, StringComparer.Ordinal).SetEquals(table.PrimaryKey))
+        {
+            errors.Add($"{entity}: key properties ({string.Join(", ", info.Keys.Select(k => k.Property.Name))}) must map exactly to the primary key of '{table.ExposedName}' ({string.Join(", ", table.PrimaryKey)}).");
+            return false;
+        }
+
+        var firstKeyType = Nullable.GetUnderlyingType(info.Keys[0].Property.PropertyType) ?? info.Keys[0].Property.PropertyType;
+        if (!InsertableKeyTypes.Contains(firstKeyType))
+        {
+            errors.Add($"{entity}: SimpleCRUD inserts support int/long/short/Guid/string keys, not {firstKeyType.Name}.");
+            return false;
+        }
+
+        // SimpleCRUD only inserts a composite key's parts when they are client-supplied ([Required], Guid or string).
+        if (info.Keys.Count > 1 && info.Keys.FirstOrDefault(k => !k.IsInsertable) is { } missing)
+        {
+            errors.Add($"{entity}: composite key part {missing.Property.Name} must be [Required] so SimpleCRUD inserts it.");
+            return false;
+        }
+
+        return true;
     }
 
     private static TItem? Match<TItem>(IEnumerable<TItem> items, Func<TItem, string> name, string wanted, bool caseSensitive, out string? error)
@@ -202,7 +258,7 @@ internal sealed class ServiceModel
     }
 }
 
-/// <summary>Entity ↔ table mapping for one bound table (API column names are the table's exposed names).</summary>
+/// <summary>Entity ↔ table mapping for one bound table (keyed by API column names).</summary>
 internal sealed class EntityBinding
 {
     private readonly Dictionary<string, string> _columnByProperty;
@@ -212,16 +268,19 @@ internal sealed class EntityBinding
         Info = info;
         Table = table;
         ByColumn = byColumn;
-        Key = info.Keys[0];
-        KeyColumn = table.PrimaryKey[0];
+        KeyColumns = table.PrimaryKey;
+        Keys = KeyColumns.Select(c => byColumn[c]).ToList();
         _columnByProperty = byColumn.ToDictionary(kv => kv.Value.Property.Name, kv => kv.Key, StringComparer.Ordinal);
     }
 
     public SimpleCrudEntityInfo Info { get; }
     public TableModel Table { get; }
     public IReadOnlyDictionary<string, SimpleCrudPropertyInfo> ByColumn { get; }
-    public SimpleCrudPropertyInfo Key { get; }
-    public string KeyColumn { get; }
+
+    /// <summary>Primary key columns (API names), aligned with <see cref="Keys"/>.</summary>
+    public IReadOnlyList<string> KeyColumns { get; }
+    public IReadOnlyList<SimpleCrudPropertyInfo> Keys { get; }
+    public bool IsComposite => Keys.Count > 1;
 
     public string? ColumnForProperty(string propertyName) => _columnByProperty.TryGetValue(propertyName, out var c) ? c : null;
 }
