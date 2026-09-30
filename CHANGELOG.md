@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
 ## [1.0.0] - 2026-09-30
 
 ### Added
@@ -32,5 +34,6 @@ All notable changes to this project are documented here. The format follows
   delete, composite keys, `UsePropertyNames()`, and startup validation of entities against the schema.
 - Depends on the ez-odata-api 1.0.5 packages from nuget.org.
 
+[Unreleased]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0-rc.1...v1.0.0
 [1.0.0-rc.1]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/releases/tag/v1.0.0-rc.1
