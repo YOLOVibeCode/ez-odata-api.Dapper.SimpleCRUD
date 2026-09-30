@@ -32,5 +32,3 @@ The test follows the style of `Tests.cs`: a counting `TableNameResolver` shows t
 This makes sequential switching correct. It doesn't try to make two dialects safe *at the same time*, which you've said is beyond SimpleCRUD's intent (#218). For anyone who needs that, I built it outside SimpleCRUD, without changing it: [ez-odata-api.Dapper.SimpleCRUD](https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD) (reproductions in `docs/upstream`, and a short note in `ERIC.md`).
 
 Happy to adjust anything. Thanks for your time.
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
