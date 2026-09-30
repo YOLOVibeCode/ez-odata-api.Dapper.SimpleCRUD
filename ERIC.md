@@ -60,7 +60,7 @@ I've been writing software since 1992. I started in COBOL on IBM mainframes, mov
 VB6, and have worked mostly in C# since .NET 1.0. Most of that time has gone into the same kind of
 work: getting data out of SQL databases and into applications, usually with some code generation
 involved. Along the way I've used most of the .NET data-access options, including ADO.NET, Entity
-Framework, SimpleData and Dapper, and published a few small tools of my own, like
+Framework, Simple.Data and Dapper, and published a few small tools of my own, like
 [ez-db-codegen-core](https://github.com/rvegajr/ez-db-codegen-core). Since 2011 I've done this as a
 consultant through my company, Noctusoft.
 
