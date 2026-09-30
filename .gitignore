@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+TestResults/
+*.db
+
+# ez-odata-api checkout used by CI
+.ez-odata-api/

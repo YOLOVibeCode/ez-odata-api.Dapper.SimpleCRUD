@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EzOdata.SimpleCrud/EzOdata.SimpleCrud.csproj" />
+    <Project Path="src/EzOdata.SimpleCrud.AspNetCore/EzOdata.SimpleCrud.AspNetCore.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EzOdata.SimpleCrud.Tests/EzOdata.SimpleCrud.Tests.csproj" />
+    <Project Path="tests/EzOdata.SimpleCrud.AspNetCore.Tests/EzOdata.SimpleCrud.AspNetCore.Tests.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/EzOdata.SimpleCrud.Sample/EzOdata.SimpleCrud.Sample.csproj" />
+  </Folder>
+</Solution>

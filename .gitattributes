@@ -1,0 +1,2 @@
+# Upstream patches must keep Dapper.SimpleCRUD's CRLF line endings byte-for-byte
+docs/upstream/*.patch -text
