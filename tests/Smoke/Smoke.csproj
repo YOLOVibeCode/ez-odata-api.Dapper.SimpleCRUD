@@ -2,8 +2,8 @@
 
   <!--
     Installs the packed .nupkg files from ../../artifacts (see nuget.config) exactly as a consumer would,
-    then exercises both packages. Not part of the solution; CI runs it before publishing:
-      dotnet run --project tests/Smoke -p:SmokeVersion=1.2.3
+    then exercises both packages. Not part of the solution; CI runs it before publishing
+    (dotnet run with project tests/Smoke and -p:SmokeVersion=1.2.3).
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

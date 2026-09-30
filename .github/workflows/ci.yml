@@ -55,9 +55,29 @@ jobs:
           name: test-results-simplecrud-${{ matrix.simplecrud }}
           path: TestResults/*.trx
 
+  smoke:
+    name: Pack & smoke-test packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Pack
+        run: |
+          for p in src/EzOdata.SimpleCrud src/EzOdata.SimpleCrud.AspNetCore; do
+            dotnet pack "$p" -c Release -o artifacts -p:EzScVersion=0.0.0-smoke.${GITHUB_RUN_NUMBER}
+          done
+
+      - name: Smoke test (installs the packed .nupkg files)
+        run: dotnet run --project tests/Smoke -p:SmokeVersion=0.0.0-smoke.${GITHUB_RUN_NUMBER}
+
   publish:
     name: Publish packages
-    needs: test
+    needs: [test, smoke]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
