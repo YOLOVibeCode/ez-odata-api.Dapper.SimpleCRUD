@@ -47,9 +47,8 @@ public static class EfCoreExtensions
                 else options.UseSqlServer("Server=localhost;Database=ez;TrustServerCertificate=True;User Id=sa;Password=ez");
                 break;
             case ConnectorTypes.MySql:
-                var version = new MySqlServerVersion(new Version(8, 4, 0));
-                if (connection is not null) options.UseMySql(connection, version);
-                else options.UseMySql("Server=localhost;Database=ez;User=ez;Password=ez", version);
+                if (connection is not null) options.UseMySQL(connection);
+                else options.UseMySQL("Server=localhost;Database=ez;User=ez;Password=ez");
                 break;
             default:
                 throw new NotSupportedException($"No EF Core provider for connector '{connectorType}'.");

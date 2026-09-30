@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
+using EzOdata.Core.Services;
+using EzOdata.EntityFrameworkCore.AspNetCore;
 using EzOdata.SimpleCrud;
 using EzOdata.SimpleCrud.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -113,13 +115,14 @@ public sealed class QuickHarness
         }
 
         var options = new DbContextOptionsBuilder<BenchDbContext>();
-        switch (session.Database.Kind)
+        var connector = session.Database.Kind switch
         {
-            case "postgresql": options.UseNpgsql(connection); break;
-            case "mysql": options.UseMySql(connection, new MySqlServerVersion(new Version(8, 4, 0))); break;
-            case "sqlserver": options.UseSqlServer(connection); break;
-            default: options.UseSqlite(connection); break;
-        }
+            "postgresql" => ConnectorTypes.PostgreSql,
+            "mysql" => ConnectorTypes.MySql,
+            "sqlserver" => ConnectorTypes.SqlServer,
+            _ => ConnectorTypes.Sqlite,
+        };
+        EfCoreExtensions.DefaultProvider(options, connector, connection);
         await using var context = new BenchDbContext(options.Options);
         context.Customers.Add(new Customer { Name = "direct", Country = "US" });
         await context.SaveChangesAsync();
