@@ -180,12 +180,20 @@ key, and PostgreSQL case-sensitivity. Any mismatch stops the app with a precise 
 
 ## Using ez-odata-api
 
-By default, `Directory.Build.props` references the sibling checkout `../ez-odata-api` read-only. To
-use the published packages from GitHub Packages instead:
+The packages depend on the published `EzOdata.*` packages on nuget.org (1.0.5), so a clone builds on
+its own. To develop against a local ez-odata-api checkout instead:
 
 ```bash
-dotnet build -p:EzOdataSource=package      # EzOdata.AspNetCore $(EzOdataVersion), default 1.0.4
+dotnet build -p:EzOdataSource=project                                  # uses ../ez-odata-api
+dotnet build -p:EzOdataSource=project -p:EzOdataRoot=/path/to/ez-odata-api/
 ```
+
+## Packages and releases
+
+| Trigger | What gets published |
+|---|---|
+| Push to `main` | `0.1.0-ci.N` prereleases to GitHub Packages |
+| Tag `vX.Y.Z` or `vX.Y.Z-rc.N` | `EzOdata.SimpleCrud` and `EzOdata.SimpleCrud.AspNetCore` to **nuget.org**, through trusted publishing (no stored API key), plus GitHub Packages and a GitHub Release |
 
 ## Tests
 
