@@ -1,6 +1,15 @@
-# ez-odata-api + Dapper.SimpleCRUD (POC)
+# ez-odata-api + Dapper.SimpleCRUD
 
-This POC adds Dapper.SimpleCRUD to [ez-odata-api](https://github.com/YOLOVibeCode/ez-odata-api)
+[![CI](https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/actions/workflows/ci.yml/badge.svg)](https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/actions/workflows/ci.yml)
+[![EzOdata.SimpleCrud](https://img.shields.io/nuget/v/EzOdata.SimpleCrud?label=EzOdata.SimpleCrud)](https://www.nuget.org/packages/EzOdata.SimpleCrud)
+[![EzOdata.SimpleCrud.AspNetCore](https://img.shields.io/nuget/v/EzOdata.SimpleCrud.AspNetCore?label=EzOdata.SimpleCrud.AspNetCore)](https://www.nuget.org/packages/EzOdata.SimpleCrud.AspNetCore)
+
+```bash
+dotnet add package EzOdata.SimpleCrud              # multi-dialect SimpleCRUD
+dotnet add package EzOdata.SimpleCrud.AspNetCore   # instant API + SimpleCRUD overrides
+```
+
+This project adds Dapper.SimpleCRUD to [ez-odata-api](https://github.com/YOLOVibeCode/ez-odata-api)
 without changing ez-odata-api at all. It has two parts:
 
 - **`EzOdata.SimpleCrud`**: an instance-based facade over [Dapper.SimpleCRUD](https://www.nuget.org/packages/Dapper.SimpleCRUD).
@@ -113,6 +122,7 @@ tables are renamed consistently, so `$expand` keeps working.
 - `Crud`, which is SimpleCRUD bound to the write's own connection and transaction
 - `Column(nameof(Prop))`, which maps an entity property to its API column name
 - `Reject(msg)` (400) and `Forbid(msg)` (403); both roll back the write
+- `OnCommitted(...)`, for side effects that run once after the write commits
 - `Items`, shared between the Before and After hooks of one operation
 
 ## How it works
@@ -204,24 +214,30 @@ EZSC_SKIP_DOCKER=1 dotnet test   # SQLite only
 
 | Suite | Covers |
 |---|---|
-| `EzOdata.SimpleCrud.Tests` (21) | Engines are lazy singletons, and simultaneous first use creates exactly one. A test reproduces the upstream `SetDialect` stale-cache bug. Each dialect emits its own SQL in one process, and the host's SimpleCRUD is untouched. Mapping is read from SimpleCRUD itself. Per-engine naming. Exceptions unwrapped. Delegates cached. Sessions and transactions. Keyed DI. Shared-mode guard. Overhead. **Real PostgreSQL, MySQL, SQL Server and SQLite, concurrently in one process.** |
-| `EzOdata.SimpleCrud.AspNetCore.Tests` (19) | Through ez-odata's real HTTP pipeline: stock tables untouched; role row filters combined with handler filters; `$expand` and `AfterRead`; inserts through SimpleCRUD and hooks; rejection returns 400 with rollback; hook side-writes roll back with the API write; insert outside the row filter returns 403; unique violation returns 409; PATCH changes only the fields sent; handler Forbid; read-only columns; row filters protect update and delete; soft delete; startup schema validation; composite keys; property-name exposure, including row filters and `$expand` across renamed keys. **One API serving four services on four database engines at once.** |
+| `EzOdata.SimpleCrud.Tests` (22) | Engines are lazy singletons, and simultaneous first use creates exactly one. A test reproduces the upstream `SetDialect` stale-cache bug. An incompatible SimpleCRUD is rejected with a clear message. Each dialect emits its own SQL in one process, and the host's SimpleCRUD is untouched. Mapping is read from SimpleCRUD itself. Per-engine naming. Exceptions unwrapped. Delegates cached. Sessions and transactions. Keyed DI. Shared-mode guard. Overhead. **Real PostgreSQL, MySQL, SQL Server and SQLite, concurrently in one process.** |
+| `EzOdata.SimpleCrud.AspNetCore.Tests` (20) | Through ez-odata's real HTTP pipeline: stock tables untouched; role row filters combined with handler filters; `$expand` and `AfterRead`; inserts through SimpleCRUD and hooks; rejection returns 400 with rollback; hook side-writes roll back with the API write; insert outside the row filter returns 403; unique violation returns 409; PATCH changes only the fields sent; handler Forbid; read-only columns; row filters protect update and delete; soft delete; startup schema validation; composite keys; property-name exposure, including row filters and `$expand` across renamed keys; `OnCommitted` (runs once after commit, never after rollback). **One API serving four services on four database engines at once.** |
+
+CI runs both suites against Dapper.SimpleCRUD 2.3.0 and 2.4.0-beta1. Before publishing, it installs the
+exact packed `.nupkg` files into [`tests/Smoke`](tests/Smoke/Program.cs) and runs them.
 
 The Docker tests use Testcontainers and find Colima's socket automatically. SQL Server 2022 images
 are x86-only and crash under QEMU on Apple silicon, so on ARM hosts the tests use **Azure SQL Edge**
 (the same SQL Server engine and T-SQL dialect). Override the image with `EZSC_MSSQL_IMAGE`.
 
-## POC limits
+## Known limits
 
 - Deep insert (nested POST) is not supported on entity-mapped tables, and a `$batch` changeset
   cannot mix entity-mapped and plain tables.
-- Key types are limited to SimpleCRUD's own: int, long, short, Guid and string.
-- The facade reads SimpleCRUD 2.3.x private metadata methods (pinned; a test guards it).
-  Isolated engines need `Dapper.SimpleCRUD.dll` on disk, so `PublishSingleFile` isn't supported.
-- Hooks get the caller from `IHttpContextAccessor`, because ez-odata's connector interface
-  doesn't carry the identity.
-- After hooks can run again if a deadlock retry happens. Put external side effects (email,
-  queues) after commit, not inside the transaction.
+- Key types are limited to SimpleCRUD's own: int, long, short, Guid and string, including composite keys.
+- The facade reads a few of SimpleCRUD's private metadata methods. CI tests 2.3.0 and 2.4.0-beta1,
+  and an incompatible version fails at startup with a clear message. Isolated engines need
+  `Dapper.SimpleCRUD.dll` on disk, so `PublishSingleFile` isn't supported.
+- Hooks get the caller from `IHttpContextAccessor`, because ez-odata's connector interface doesn't carry
+  the identity.
+- Hook code inside the transaction can run again if a deadlock retry happens. Put external side effects
+  (email, queues) in `ctx.OnCommitted(...)`, which runs once after commit.
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Credits
 

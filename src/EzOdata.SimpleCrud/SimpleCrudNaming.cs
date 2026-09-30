@@ -26,6 +26,7 @@ public sealed class SimpleCrudNaming
         _attributesWin = attributesWin;
     }
 
+    /// <summary>Diagnostic name of the convention.</summary>
     public string Name { get; }
 
     /// <summary>snake_case tables and columns (<c>OrderLine.UnitPrice</c> → <c>order_line.unit_price</c>), attributes still win.</summary>

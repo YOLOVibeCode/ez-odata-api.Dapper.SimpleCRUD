@@ -3,11 +3,12 @@
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Description>Instance-based facade over Dapper.SimpleCRUD: one lazily created, isolated SimpleCRUD engine per dialect, so several databases (and your own SimpleCRUD code) coexist in one process.</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper.SimpleCRUD" Version="2.3.0" />
+    <PackageReference Include="Dapper.SimpleCRUD" Version="$(SimpleCrudVersion)" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">

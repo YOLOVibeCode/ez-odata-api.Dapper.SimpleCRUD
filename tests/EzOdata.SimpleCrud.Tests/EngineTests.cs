@@ -203,6 +203,16 @@ public sealed class EngineTests(ITestOutputHelper output) : IAsyncLifetime
     }
 
     [Fact]
+    public void An_incompatible_SimpleCRUD_is_rejected_with_a_clear_message()
+    {
+        var ex = Assert.Throws<NotSupportedException>(() => SimpleCrudEngine.VerifyMetadataMembers(typeof(object)));
+        Assert.Contains("is not supported by EzOdata.SimpleCrud", ex.Message);
+        Assert.Contains("GetTableName(Type)", ex.Message);
+
+        SimpleCrudEngine.VerifyMetadataMembers(typeof(SimpleCRUD)); // the referenced version passes
+    }
+
+    [Fact]
     public async Task Exceptions_surface_unwrapped()
     {
         var engine = SimpleCrudEngines.Isolated(SimpleCRUD.Dialect.SQLite);

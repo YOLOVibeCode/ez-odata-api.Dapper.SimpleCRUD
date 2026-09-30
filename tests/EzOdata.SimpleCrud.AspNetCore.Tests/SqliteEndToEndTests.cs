@@ -44,6 +44,9 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
                         .AfterInsert(async (o, ctx) =>
                         {
                             await ctx.Crud.InsertAsync(new AuditLog { Entity = "order", EntityId = o.Id, Action = "insert", Actor = ctx.UserId });
+                            var journal = ctx.Services.GetRequiredService<HookJournal>();
+                            ctx.OnCommitted(() => { lock (journal) journal.Calls.Add($"committed:order:{o.Total}"); });
+                            if (o.Total == 77) ctx.OnCommitted(() => throw new InvalidOperationException("mail server down"));
                             if (o.Total > 1000) ctx.Reject("Orders over 1000 need approval.");
                         })
                         .AfterRead((row, _) => { if (row["total"] is double d) row.Set("total", Math.Round(d, 1)); }))));
@@ -151,6 +154,26 @@ public sealed class SqliteEndToEndTests : IAsyncLifetime
         var ok = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 99.0 });
         Assert.Equal(HttpStatusCode.Created, ok.StatusCode);
         Assert.Equal(1L, await Scalar<long>("SELECT COUNT(*) FROM audit_log WHERE entity = 'order'"));
+    }
+
+    [Fact]
+    public async Task OnCommitted_runs_once_after_commit_and_never_after_rollback()
+    {
+        var journal = _host.Services.GetRequiredService<HookJournal>();
+
+        var rejected = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 5000.0 });
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.DoesNotContain("committed:order:5000", journal.Calls);  // registered, then rolled back: never runs
+
+        var ok = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 42.0 });
+        Assert.Equal(HttpStatusCode.Created, ok.StatusCode);
+        Assert.Single(journal.Calls, c => c == "committed:order:42");
+
+        // A failing callback is logged; the committed write and its response stand.
+        var flaky = await Admin.PostAsJsonAsync("/api/odata/crm/orders", new { customer_id = 1, total = 77.0 });
+        Assert.Equal(HttpStatusCode.Created, flaky.StatusCode);
+        Assert.Equal(1L, await Scalar<long>("SELECT COUNT(*) FROM orders WHERE total = 77"));
+        Assert.Contains("committed:order:77", journal.Calls);
     }
 
     [Fact]

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Installs the packed .nupkg files from ../../artifacts (see nuget.config) exactly as a consumer would,
+    then exercises both packages. Not part of the solution; CI runs it before publishing:
+      dotnet run --project tests/Smoke -p:SmokeVersion=1.2.3
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <SmokeVersion Condition="'$(SmokeVersion)' == ''">0.0.0-missing</SmokeVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="EzOdata.SimpleCrud" Version="$(SmokeVersion)" />
+    <PackageReference Include="EzOdata.SimpleCrud.AspNetCore" Version="$(SmokeVersion)" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+
+</Project>

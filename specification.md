@@ -1,6 +1,6 @@
 # EzOdata + Dapper.SimpleCRUD: Specification
 
-**Status:** v1.0, describes the working POC · **Supersedes:** Draft v0.2 (POCO-only schema, one
+**Status:** v1.0, describes release 1.0.0 · **Supersedes:** Draft v0.2 (POCO-only schema, one
 dialect per process, upstream ez-odata changes) · **Owner:** Noctusoft, Inc. · **License:** Apache-2.0
 
 | Building block | Role |
@@ -60,6 +60,7 @@ admin UI (configuration is code, as in ez-odata's embedded mode).
 | E-2 | An isolated engine loads its own copy of `Dapper.SimpleCRUD.dll` in a dedicated `AssemblyLoadContext`. Dapper, providers and entity types stay shared | `Isolated_engines_never_touch_the_process_wide_SimpleCRUD` |
 | E-3 | Each engine emits its own dialect's SQL, in one process | `Each_engine_emits_its_own_dialect_in_one_process` (4 dialects) |
 | E-4 | The process-wide SimpleCRUD is never modified, unless the host explicitly passes `Shared(dialect, claimProcessDialect: true)` | `Shared_engine_never_changes_global_state_implicitly` |
+| E-6 | An incompatible SimpleCRUD fails when the engine is created, naming the version and the missing members. CI tests 2.3.0 and 2.4.0-beta1 | `An_incompatible_SimpleCRUD_is_rejected_with_a_clear_message` |
 | E-5 | On .NET Framework / netstandard2.0, `For` falls back to the shared engine: one dialect, with conflicts rejected | Build: `netstandard2.0` target |
 
 ### 5.2 API
@@ -127,6 +128,7 @@ app.MapEzOData("/api/odata");                                             // sto
 | X-10 | Entity and table mismatches (table, columns, key, PostgreSQL case-sensitivity) fail at startup | `An_entity_that_does_not_match_the_database_stops_startup` |
 | X-11 | Services on different dialects coexist in one host, each on its own engine | `Every_dialect_behind_one_api_in_one_process` |
 | X-12 | Composite primary keys, as SimpleCRUD models them (`[Key, Required]` parts): create, read, update, delete and conflicts by full key | `Composite_keys_work_end_to_end_through_SimpleCRUD` |
+| X-14 | `ctx.OnCommitted(...)` runs once after commit, never after rollback, and a failing callback doesn't undo a committed write | `OnCommitted_runs_once_after_commit_and_never_after_rollback` |
 | X-13 | `UsePropertyNames()`: entity property names become the API contract (payloads, `$filter`, `$orderby`, `$metadata`, row filters), with foreign keys renamed consistently across tables | `Entity_property_names_become_the_api_contract`, `Row_filters_and_expand_follow_the_renamed_columns` |
 
 ### 6.4 Consistency
@@ -161,12 +163,11 @@ small tables, and `SERIALIZABLE` elsewhere. Deadlocks and serialization failures
 | Deep insert on entity tables; `$batch` mixing entity and plain tables | v1.1 |
 | .NET Framework 4.8 Web API host | Only after the ez-odata `EzOdata.WebApi` adapter is in use; the facade already targets netstandard2.0 |
 | MCP | Not part of ez's embedded package |
-| After hooks may re-run on a deadlock retry | Document, or add `ctx.OnCommitted(...)` for external side effects |
 | `PublishSingleFile` | Isolation loads the DLL from disk; embed it as a resource if needed |
 
 ## 10. Quality
 
-- 21 facade tests and 19 end-to-end tests. They run against real PostgreSQL 16, MySQL 8.4,
+- 22 facade tests and 20 end-to-end tests, run against SimpleCRUD 2.3.0 and 2.4.0-beta1, plus a smoke test of the packed packages. They run against real PostgreSQL 16, MySQL 8.4,
   SQL Server (Azure SQL Edge) and SQLite via Testcontainers, and the full suite passed twice in a row.
 - Every requirement in §5–6 names its test.
 - Sample app: `samples/EzOdata.SimpleCrud.Sample`, verified over HTTP.

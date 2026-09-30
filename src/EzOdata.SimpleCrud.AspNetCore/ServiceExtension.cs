@@ -288,6 +288,7 @@ internal sealed class EntityBinding
 /// <summary>Entity/table mismatches found when binding (fails startup rather than the first request).</summary>
 public sealed class EzExtensionConfigurationException : InvalidOperationException
 {
+    /// <summary>Creates the exception listing every mismatch found for <paramref name="service"/>.</summary>
     public EzExtensionConfigurationException(string service, IReadOnlyList<string> problems)
         : base($"ez-odata SimpleCRUD extension for service '{service}' does not match the database:{Environment.NewLine} - "
                + string.Join(Environment.NewLine + " - ", problems))
@@ -295,5 +296,6 @@ public sealed class EzExtensionConfigurationException : InvalidOperationExceptio
         Problems = problems;
     }
 
+    /// <summary>Each entity/table mismatch, one per entry.</summary>
     public IReadOnlyList<string> Problems { get; }
 }

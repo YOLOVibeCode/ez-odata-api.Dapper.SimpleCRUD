@@ -16,9 +16,11 @@ public interface ISimpleCrud : ISimpleCrudOperations
 /// <summary>Entry point: <c>SimpleCrud.For(Dialect.PostgreSQL).WithConnection(...).Build()</c>.</summary>
 public static class SimpleCrud
 {
+    /// <summary>Starts configuring a SimpleCRUD client for <paramref name="dialect"/>.</summary>
     public static SimpleCrudBuilder For(SimpleCRUD.Dialect dialect) => new(dialect);
 }
 
+/// <summary>Fluent configuration for an <see cref="ISimpleCrud"/> client.</summary>
 public sealed class SimpleCrudBuilder
 {
     private readonly SimpleCRUD.Dialect _dialect;
@@ -30,11 +32,13 @@ public sealed class SimpleCrudBuilder
 
     internal SimpleCrudBuilder(SimpleCRUD.Dialect dialect) => _dialect = dialect;
 
+    /// <summary>The factory that creates a new (unopened) connection per operation or session.</summary>
     public SimpleCrudBuilder WithConnection(Func<IDbConnection> factory) { _connectionFactory = factory; return this; }
 
     /// <summary>Per-engine naming (isolated engines only). Reuse the same instance across clients to share an engine.</summary>
     public SimpleCrudBuilder WithNaming(SimpleCrudNaming naming) { _naming = naming; return this; }
 
+    /// <summary>Command timeout, in seconds, for every operation.</summary>
     public SimpleCrudBuilder WithCommandTimeout(int seconds) { _commandTimeout = seconds; return this; }
 
     /// <summary>Use the process-wide SimpleCRUD instead of an isolated copy (see <see cref="SimpleCrudEngines.Shared"/>).</summary>
@@ -45,6 +49,7 @@ public sealed class SimpleCrudBuilder
         return this;
     }
 
+    /// <summary>Builds the client on the (lazily created, shared) engine for this dialect and naming.</summary>
     public ISimpleCrud Build()
     {
         var factory = _connectionFactory ?? throw new InvalidOperationException("Call WithConnection(...) before Build().");
