@@ -84,6 +84,19 @@ Every level is opt-in. With none of them configured, you have exactly stock ez-o
 | 5 | Override `InsertAsync` / `UpdateAsync` / `DeleteAsync`, or `InsteadOf*` | Replace the operation itself (for example, soft delete) |
 | 6 | Your own endpoints plus `ISimpleCrud` | Plain ASP.NET Core next to it |
 
+Composite keys work the way SimpleCRUD models them (every part `[Key, Required]`), for example
+`GET /order_lines(order_id=1,line_no=2)`. By default the API uses column names (`full_name`). To make
+entity property names the API contract instead (`Name`), add `.UsePropertyNames()`:
+
+```csharp
+builder.Services.ExtendEzOData(x => x.Service("crm", crm => crm
+    .UsePropertyNames()                  // GET /customers?$filter=Name eq 'Ada' → { "Name": "Ada", ... }
+    .Table<Customer, CustomerHandler>()));
+```
+
+SQL keeps using column names. Row filters and field rules use the API names, and foreign keys across
+tables are renamed consistently, so `$expand` keeps working.
+
 ### Handler members
 
 | Member | When it runs | Default |
@@ -184,7 +197,7 @@ EZSC_SKIP_DOCKER=1 dotnet test   # SQLite only
 | Suite | Covers |
 |---|---|
 | `EzOdata.SimpleCrud.Tests` (21) | Engines are lazy singletons, and simultaneous first use creates exactly one. A test reproduces the upstream `SetDialect` stale-cache bug. Each dialect emits its own SQL in one process, and the host's SimpleCRUD is untouched. Mapping is read from SimpleCRUD itself. Per-engine naming. Exceptions unwrapped. Delegates cached. Sessions and transactions. Keyed DI. Shared-mode guard. Overhead. **Real PostgreSQL, MySQL, SQL Server and SQLite, concurrently in one process.** |
-| `EzOdata.SimpleCrud.AspNetCore.Tests` (16) | Through ez-odata's real HTTP pipeline: stock tables untouched; role row filters combined with handler filters; `$expand` and `AfterRead`; inserts through SimpleCRUD and hooks; rejection returns 400 with rollback; hook side-writes roll back with the API write; insert outside the row filter returns 403; unique violation returns 409; PATCH changes only the fields sent; handler Forbid; read-only columns; row filters protect update and delete; soft delete; startup schema validation. **One API serving four services on four database engines at once.** |
+| `EzOdata.SimpleCrud.AspNetCore.Tests` (19) | Through ez-odata's real HTTP pipeline: stock tables untouched; role row filters combined with handler filters; `$expand` and `AfterRead`; inserts through SimpleCRUD and hooks; rejection returns 400 with rollback; hook side-writes roll back with the API write; insert outside the row filter returns 403; unique violation returns 409; PATCH changes only the fields sent; handler Forbid; read-only columns; row filters protect update and delete; soft delete; startup schema validation; composite keys; property-name exposure, including row filters and `$expand` across renamed keys. **One API serving four services on four database engines at once.** |
 
 The Docker tests use Testcontainers and find Colima's socket automatically. SQL Server 2022 images
 are x86-only and crash under QEMU on Apple silicon, so on ARM hosts the tests use **Azure SQL Edge**
@@ -192,8 +205,8 @@ are x86-only and crash under QEMU on Apple silicon, so on ARM hosts the tests us
 
 ## POC limits
 
-- Composite keys and deep insert (nested POST) are not supported on entity-mapped tables.
-  A `$batch` changeset cannot mix entity-mapped and plain tables.
+- Deep insert (nested POST) is not supported on entity-mapped tables, and a `$batch` changeset
+  cannot mix entity-mapped and plain tables.
 - Key types are limited to SimpleCRUD's own: int, long, short, Guid and string.
 - The facade reads SimpleCRUD 2.3.x private metadata methods (pinned; a test guards it).
   Isolated engines need `Dapper.SimpleCRUD.dll` on disk, so `PublishSingleFile` isn't supported.
