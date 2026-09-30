@@ -20,7 +20,7 @@ public abstract class MultiDialectSuite(Databases databases, ITestOutputHelper o
     [SkippableFact]
     public async Task Every_dialect_behind_one_api_in_one_process()
     {
-        var dbs = databases.Available.ToList();
+        var dbs = databases.Available.Where(Include).ToList();
         Skip.If(dbs.Count < 2, $"needs at least two Docker databases: {string.Join("; ", databases.Failures.Select(f => $"{f.Key}: {f.Value}"))}");
         dbs.Add(TestDatabase.NewSqlite());
 
@@ -101,6 +101,8 @@ public abstract class MultiDialectSuite(Databases databases, ITestOutputHelper o
         foreach (var failure in databases.Failures) output.WriteLine($"Not available: {failure.Key} ({failure.Value})");
     }
 
+    protected virtual bool Include(TestDatabase db) => true;
+
     protected virtual void AssertEngineSpecific(IReadOnlyList<TestDatabase> dbs) { }
 
     private static ConnectionSpec Spec(TestDatabase db, string tls) => new()
@@ -130,4 +132,7 @@ public sealed class EfCore_MultiDialectTests(Databases databases, ITestOutputHel
     : MultiDialectSuite(databases, output)
 {
     protected override IEngineUnderTest Engine => EfCoreEngineUnderTest.Instance;
+
+    // ez-odata shares a MySqlConnector connection; no EF Core 10 provider accepts that type.
+    protected override bool Include(TestDatabase db) => db.Kind != "mysql";
 }

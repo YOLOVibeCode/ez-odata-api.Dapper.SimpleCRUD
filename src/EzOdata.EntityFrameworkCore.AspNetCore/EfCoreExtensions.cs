@@ -47,9 +47,10 @@ public static class EfCoreExtensions
                 else options.UseSqlServer("Server=localhost;Database=ez;TrustServerCertificate=True;User Id=sa;Password=ez");
                 break;
             case ConnectorTypes.MySql:
-                if (connection is not null) options.UseMySQL(connection);
-                else options.UseMySQL("Server=localhost;Database=ez;User=ez;Password=ez");
-                break;
+                throw new NotSupportedException(
+                    "EF Core MySQL is not supported on ez-odata's MySqlConnector connection. " +
+                    "Pomelo 9 is not ABI-compatible with EF Core 10, and Oracle MySql.EntityFrameworkCore requires MySql.Data. " +
+                    "Use .UseSimpleCrud() for MySQL, or pass a custom UseEfCore configure.");
             default:
                 throw new NotSupportedException($"No EF Core provider for connector '{connectorType}'.");
         }
