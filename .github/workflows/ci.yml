@@ -21,9 +21,7 @@ concurrency:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  # ez-odata-api is consumed unmodified at this ref (see Directory.Build.props: EzOdataRoot)
-  EZODATA_REF: v1.0.4
-  EZODATA_ROOT: ${{ github.workspace }}/.ez-odata-api/
+  # ez-odata-api comes from its published packages on nuget.org (Directory.Build.props: EzOdataVersion)
 
 jobs:
   test:
@@ -33,23 +31,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check out ez-odata-api ${{ env.EZODATA_REF }}
-        uses: actions/checkout@v4
-        with:
-          repository: YOLOVibeCode/ez-odata-api
-          ref: ${{ env.EZODATA_REF }}
-          path: .ez-odata-api
-
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
       - name: Build
-        run: dotnet build EzOdata.SimpleCrud.slnx -c Release -p:EzOdataRoot=$EZODATA_ROOT
+        run: dotnet build EzOdata.SimpleCrud.slnx -c Release
 
       - name: Test
         run: >
-          dotnet test EzOdata.SimpleCrud.slnx -c Release --no-build -p:EzOdataRoot=$EZODATA_ROOT
+          dotnet test EzOdata.SimpleCrud.slnx -c Release --no-build
           --logger "console;verbosity=normal" --logger trx --results-directory TestResults
 
       - name: Upload test results
@@ -71,13 +62,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check out ez-odata-api ${{ env.EZODATA_REF }}
-        uses: actions/checkout@v4
-        with:
-          repository: YOLOVibeCode/ez-odata-api
-          ref: ${{ env.EZODATA_REF }}
-          path: .ez-odata-api
-
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
@@ -91,7 +75,7 @@ jobs:
       - name: Pack
         run: |
           for p in src/EzOdata.SimpleCrud src/EzOdata.SimpleCrud.AspNetCore; do
-            dotnet pack "$p" -c Release -o artifacts -p:EzScVersion=$PACKAGE_VERSION -p:EzOdataRoot=$EZODATA_ROOT
+            dotnet pack "$p" -c Release -o artifacts -p:EzScVersion=$PACKAGE_VERSION
           done
 
       - name: Push to GitHub Packages
@@ -123,4 +107,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          prerelease=""; [[ "$PACKAGE_VERSION" == *-* ]] && prerelease="--prerelease"
+          gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg --title "$GITHUB_REF_NAME" --generate-notes $prerelease

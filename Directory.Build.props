@@ -22,13 +22,13 @@
     <IsPackable>false</IsPackable>
 
     <!--
-      Where ez-odata-api comes from. Default: the sibling checkout, referenced read-only
-      (nothing in it is modified). Set EzOdataSource=package to consume the published
-      EzOdata.* packages from GitHub Packages instead.
+      Where ez-odata-api comes from. Default: the published EzOdata.* packages on nuget.org.
+      For side-by-side development against a checkout, build with -p:EzOdataSource=project
+      (and -p:EzOdataRoot=path/to/ez-odata-api/ if it is not a sibling folder).
     -->
-    <EzOdataSource Condition="'$(EzOdataSource)' == ''">project</EzOdataSource>
+    <EzOdataSource Condition="'$(EzOdataSource)' == ''">package</EzOdataSource>
     <EzOdataRoot Condition="'$(EzOdataRoot)' == ''">$(MSBuildThisFileDirectory)..\ez-odata-api\</EzOdataRoot>
-    <EzOdataVersion Condition="'$(EzOdataVersion)' == ''">1.0.4</EzOdataVersion>
+    <EzOdataVersion Condition="'$(EzOdataVersion)' == ''">1.0.5</EzOdataVersion>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
