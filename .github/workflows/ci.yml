@@ -25,9 +25,14 @@ env:
 
 jobs:
   test:
-    name: Build & test (4 databases)
+    name: Build & test (4 databases, SimpleCRUD ${{ matrix.simplecrud }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The minimum the packages depend on, and SimpleCRUD's newest release.
+        simplecrud: ['2.3.0', '2.4.0-beta1']
     steps:
       - uses: actions/checkout@v4
 
@@ -36,18 +41,18 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Build
-        run: dotnet build EzOdata.SimpleCrud.slnx -c Release
+        run: dotnet build EzOdata.SimpleCrud.slnx -c Release -p:SimpleCrudVersion=${{ matrix.simplecrud }}
 
       - name: Test
         run: >
-          dotnet test EzOdata.SimpleCrud.slnx -c Release --no-build
+          dotnet test EzOdata.SimpleCrud.slnx -c Release --no-build -p:SimpleCrudVersion=${{ matrix.simplecrud }}
           --logger "console;verbosity=normal" --logger trx --results-directory TestResults
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-simplecrud-${{ matrix.simplecrud }}
           path: TestResults/*.trx
 
   publish:
@@ -68,9 +73,10 @@ jobs:
 
       - name: Version
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.1.0-ci.${GITHUB_RUN_NUMBER}"; fi
+          base=$(dotnet msbuild src/EzOdata.SimpleCrud -getProperty:EzScVersion)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="${base}-ci.${GITHUB_RUN_NUMBER}"; fi
           echo "PACKAGE_VERSION=$v" >> "$GITHUB_ENV"
-          echo "Publishing $v"
+          echo "Publishing $v (project version $base)"
 
       - name: Pack
         run: |
@@ -78,11 +84,15 @@ jobs:
             dotnet pack "$p" -c Release -o artifacts -p:EzScVersion=$PACKAGE_VERSION
           done
 
+      - name: Smoke test the packed packages
+        # Installs the exact .nupkg files (tests/Smoke/nuget.config → ./artifacts) and runs both packages.
+        run: dotnet run --project tests/Smoke -p:SmokeVersion=$PACKAGE_VERSION
+
       - name: Push to GitHub Packages
         run: >
           dotnet nuget push "artifacts/*.nupkg"
           --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
-          --api-key "${{ secrets.GITHUB_TOKEN }}" --skip-duplicate
+          --api-key "${{ secrets.GITHUB_TOKEN }}" --skip-duplicate --no-symbols
 
       - name: Log in to nuget.org (trusted publishing)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -93,6 +103,7 @@ jobs:
 
       - name: Push to nuget.org
         if: startsWith(github.ref, 'refs/tags/v')
+        # .snupkg symbol packages next to each .nupkg are pushed to nuget.org's symbol server too.
         run: >
           dotnet nuget push "artifacts/*.nupkg"
           --source https://api.nuget.org/v3/index.json
@@ -101,7 +112,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: packages-${{ env.PACKAGE_VERSION }}
-          path: artifacts/*.nupkg
+          path: artifacts/*.*nupkg
 
       - name: GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -109,4 +120,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           prerelease=""; [[ "$PACKAGE_VERSION" == *-* ]] && prerelease="--prerelease"
-          gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+          gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg artifacts/*.snupkg --title "$GITHUB_REF_NAME" --generate-notes $prerelease
