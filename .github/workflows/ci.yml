@@ -10,6 +10,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      compare:
+        description: Run ./compare.sh (tests + timings + report)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -68,7 +73,7 @@ jobs:
 
       - name: Pack
         run: |
-          for p in src/EzOdata.SimpleCrud src/EzOdata.SimpleCrud.AspNetCore; do
+          for p in src/EzOdata.SimpleCrud src/EzOdata.Entities.AspNetCore src/EzOdata.SimpleCrud.AspNetCore src/EzOdata.EntityFrameworkCore.AspNetCore; do
             dotnet pack "$p" -c Release -o artifacts -p:EzScVersion=0.0.0-smoke.${GITHUB_RUN_NUMBER}
           done
 
@@ -100,7 +105,7 @@ jobs:
 
       - name: Pack
         run: |
-          for p in src/EzOdata.SimpleCrud src/EzOdata.SimpleCrud.AspNetCore; do
+          for p in src/EzOdata.SimpleCrud src/EzOdata.Entities.AspNetCore src/EzOdata.SimpleCrud.AspNetCore src/EzOdata.EntityFrameworkCore.AspNetCore; do
             dotnet pack "$p" -c Release -o artifacts -p:EzScVersion=$PACKAGE_VERSION
           done
 
@@ -141,3 +146,21 @@ jobs:
         run: |
           prerelease=""; [[ "$PACKAGE_VERSION" == *-* ]] && prerelease="--prerelease"
           gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg artifacts/*.snupkg --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+
+  compare:
+    name: Compare engines
+    if: github.event_name == 'workflow_dispatch' && inputs.compare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Compare
+        run: ./compare.sh --no-open
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compare
+          path: artifacts/compare/**

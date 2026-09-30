@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>EF Core write engine for EzOdata.Entities.AspNetCore — take over ez-odata-api tables with a DbContext and typed hooks.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EzOdata.Entities.AspNetCore\EzOdata.Entities.AspNetCore.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EzOdata.Entities.AspNetCore.Tests" />
+    <InternalsVisibleTo Include="EzOdata.Entities.Benchmarks" />
+  </ItemGroup>
+
+</Project>

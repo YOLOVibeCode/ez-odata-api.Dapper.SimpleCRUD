@@ -1,6 +1,6 @@
 using EzOdata.Core.Query;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>Small builders for ez-odata's Query IR, for <see cref="EzTableHandler{T}.BeforeReadAsync"/>.</summary>
 public static class EzFilter

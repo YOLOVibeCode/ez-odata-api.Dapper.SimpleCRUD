@@ -1,13 +1,18 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/EzOdata.SimpleCrud/EzOdata.SimpleCrud.csproj" />
+    <Project Path="src/EzOdata.Entities.AspNetCore/EzOdata.Entities.AspNetCore.csproj" />
     <Project Path="src/EzOdata.SimpleCrud.AspNetCore/EzOdata.SimpleCrud.AspNetCore.csproj" />
+    <Project Path="src/EzOdata.EntityFrameworkCore.AspNetCore/EzOdata.EntityFrameworkCore.AspNetCore.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EzOdata.SimpleCrud.Tests/EzOdata.SimpleCrud.Tests.csproj" />
-    <Project Path="tests/EzOdata.SimpleCrud.AspNetCore.Tests/EzOdata.SimpleCrud.AspNetCore.Tests.csproj" />
+    <Project Path="tests/EzOdata.Entities.AspNetCore.Tests/EzOdata.Entities.AspNetCore.Tests.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/EzOdata.SimpleCrud.Sample/EzOdata.SimpleCrud.Sample.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/EzOdata.Entities.Benchmarks/EzOdata.Entities.Benchmarks.csproj" />
   </Folder>
 </Solution>

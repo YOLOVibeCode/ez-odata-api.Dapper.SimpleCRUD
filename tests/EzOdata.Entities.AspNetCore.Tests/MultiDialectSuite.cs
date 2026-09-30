@@ -4,20 +4,19 @@ using System.Text.Json;
 using Dapper;
 using EzOdata.Connectors.Abstractions;
 using EzOdata.Core.Policy;
+using EzOdata.Entities.AspNetCore;
+using EzOdata.SimpleCrud;
 using EzOdata.SimpleCrud.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace EzOdata.SimpleCrud.AspNetCore.Tests;
+namespace EzOdata.Entities.AspNetCore.Tests;
 
-/// <summary>
-/// One ASP.NET Core app, one ez-odata API, four services on four different databases
-/// (PostgreSQL, MySQL, SQL Server, SQLite), all extended with the same SimpleCRUD entity and handler,
-/// hammered concurrently. This is the scenario SimpleCRUD's process-wide dialect makes impossible.
-/// </summary>
-public sealed class MultiDialectEndToEndTests(Databases databases, ITestOutputHelper output) : IClassFixture<Databases>
+public abstract class MultiDialectSuite(Databases databases, ITestOutputHelper output) : IClassFixture<Databases>
 {
+    protected abstract IEngineUnderTest Engine { get; }
+
     [SkippableFact]
     public async Task Every_dialect_behind_one_api_in_one_process()
     {
@@ -50,7 +49,14 @@ public sealed class MultiDialectEndToEndTests(Databases databases, ITestOutputHe
                 services.AddSingleton<HookJournal>();
                 services.ExtendEzOData(x =>
                 {
-                    foreach (var db in dbs) x.Service(db.Kind, s => s.Table<Customer, CustomerHandler>().Table<Order>());
+                    foreach (var db in dbs)
+                    {
+                        x.Service(db.Kind, s =>
+                        {
+                            Engine.Configure(s);
+                            s.Table<Customer, CustomerHandler>().Table<Order>();
+                        });
+                    }
                 });
             });
 
@@ -60,7 +66,6 @@ public sealed class MultiDialectEndToEndTests(Databases databases, ITestOutputHe
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var root = $"/api/odata/{db.Kind}";
 
-            // 10 concurrent API inserts per database, all through SimpleCRUD + the handler
             var created = await Task.WhenAll(Enumerable.Range(1, 10).Select(async i =>
             {
                 var response = await client.PostAsJsonAsync($"{root}/customers",
@@ -79,24 +84,24 @@ public sealed class MultiDialectEndToEndTests(Databases databases, ITestOutputHe
             Assert.All(deletes, d => Assert.Equal(HttpStatusCode.NoContent, d.StatusCode));
 
             var page = JsonDocument.Parse(await client.GetStringAsync($"{root}/customers?$count=true&$expand=orders")).RootElement;
-            Assert.Equal(2 + 10 - 3, page.GetProperty("@odata.count").GetInt32()); // soft-deleted rows hidden
+            Assert.Equal(2 + 10 - 3, page.GetProperty("@odata.count").GetInt32());
 
             await using var connection = db.Connect();
             var breakdown = await connection.QueryAsync<(string Action, int N)>("SELECT action, COUNT(*) FROM audit_log GROUP BY action");
-            output.WriteLine($"{db.Kind}: audit {string.Join(", ", breakdown.Select(b => $"{b.Action}={b.N}"))}; " +
-                $"customers={await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM customers")}");
-            Assert.Equal(12, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM customers"));          // 2 seeded + 10; soft-deleted rows kept
-            Assert.Equal(13, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM audit_log"));          // 10 inserts + 3 soft deletes
+            output.WriteLine($"{Engine.Name}/{db.Kind}: audit {string.Join(", ", breakdown.Select(b => $"{b.Action}={b.N}"))}; " +
+                $"customers={await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM customers")}; {watch.ElapsedMilliseconds} ms");
+            Assert.Equal(12, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM customers"));
+            Assert.Equal(13, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM audit_log"));
             Assert.Equal($"patched@{db.Kind}.example",
                 await connection.ExecuteScalarAsync<string>($"SELECT email FROM customers WHERE id = {ids[0]}"));
-            output.WriteLine($"{db.Kind}: {watch.ElapsedMilliseconds} ms");
         }));
 
-        var engines = SimpleCrudEngines.All.Where(e => e.IsIsolated && e.Naming is null).Select(e => e.Dialect).ToHashSet();
-        foreach (var db in dbs) Assert.Contains(db.Dialect, engines);
         Assert.Equal(processWide, SimpleCRUD.GetDialect());
+        AssertEngineSpecific(dbs);
         foreach (var failure in databases.Failures) output.WriteLine($"Not available: {failure.Key} ({failure.Value})");
     }
+
+    protected virtual void AssertEngineSpecific(IReadOnlyList<TestDatabase> dbs) { }
 
     private static ConnectionSpec Spec(TestDatabase db, string tls) => new()
     {
@@ -107,4 +112,22 @@ public sealed class MultiDialectEndToEndTests(Databases databases, ITestOutputHe
         Password = db.Password,
         Tls = new TlsSpec { Mode = tls },
     };
+}
+
+public sealed class SimpleCrud_MultiDialectTests(Databases databases, ITestOutputHelper output)
+    : MultiDialectSuite(databases, output)
+{
+    protected override IEngineUnderTest Engine => SimpleCrudEngineUnderTest.Instance;
+
+    protected override void AssertEngineSpecific(IReadOnlyList<TestDatabase> dbs)
+    {
+        var engines = SimpleCrudEngines.All.Where(e => e.IsIsolated && e.Naming is null).Select(e => e.Dialect).ToHashSet();
+        foreach (var db in dbs) Assert.Contains(db.Dialect, engines);
+    }
+}
+
+public sealed class EfCore_MultiDialectTests(Databases databases, ITestOutputHelper output)
+    : MultiDialectSuite(databases, output)
+{
+    protected override IEngineUnderTest Engine => EfCoreEngineUnderTest.Instance;
 }

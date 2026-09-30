@@ -1,10 +1,13 @@
 using Dapper;
 using EzOdata.Core.Query;
+using EzOdata.Entities.AspNetCore;
+using EzOdata.EntityFrameworkCore.AspNetCore;
 using EzOdata.SimpleCrud.AspNetCore;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.DependencyInjection;
 
-namespace EzOdata.SimpleCrud.AspNetCore.Tests;
-
-// Plain Dapper.SimpleCRUD entities — nothing ez-odata specific on them.
+namespace EzOdata.Entities.AspNetCore.Tests;
 
 [Table("customers")]
 public class Customer
@@ -16,7 +19,6 @@ public class Customer
     [Column("owner_id")] public string? OwnerId { get; set; }
     [Column("created_by"), IgnoreUpdate] public string? CreatedBy { get; set; }
     [Column("is_deleted")] public bool IsDeleted { get; set; }
-    // "notes" is deliberately not mapped: it stays readable but becomes read-only in the API.
 }
 
 [Table("orders")]
@@ -37,13 +39,22 @@ public class AuditLog
     [Column("actor")] public string? Actor { get; set; }
 }
 
+[Table("order_lines")]
+public class OrderLine
+{
+    [Key, Required, Column("order_id")] public int OrderId { get; set; }
+    [Key, Required, Column("line_no")] public int LineNo { get; set; }
+    [Column("product")] public string Product { get; set; } = "";
+    [Column("qty")] public int Qty { get; set; }
+}
+
 /// <summary>Singleton journal a handler writes to, proving handlers are created with DI.</summary>
 public sealed class HookJournal
 {
     public List<string> Calls { get; } = [];
 }
 
-/// <summary>The DreamFactory-style override, as a typed class: validation, stamping, audit, soft delete.</summary>
+/// <summary>Typed hooks: validation, stamping, audit, soft delete. Uses <see cref="EzHookContext.Data"/> so both engines work.</summary>
 public sealed class CustomerHandler(HookJournal journal) : EzTableHandler<Customer>
 {
     public override Task<QueryRequest> BeforeReadAsync(QueryRequest query, EzHookContext ctx) =>
@@ -59,7 +70,7 @@ public sealed class CustomerHandler(HookJournal journal) : EzTableHandler<Custom
     }
 
     public override Task AfterInsertAsync(Customer customer, EzHookContext ctx) =>
-        ctx.Crud.InsertAsync(new AuditLog { Entity = "customer", EntityId = customer.Id, Action = "insert", Actor = ctx.UserId });
+        ctx.Data.InsertAsync(new AuditLog { Entity = "customer", EntityId = customer.Id, Action = "insert", Actor = ctx.UserId });
 
     public override Task BeforeUpdateAsync(Customer customer, Customer original, EzHookContext ctx)
     {
@@ -71,15 +82,92 @@ public sealed class CustomerHandler(HookJournal journal) : EzTableHandler<Custom
         return Task.CompletedTask;
     }
 
-    /// <summary>Soft delete: the API's DELETE becomes an update through SimpleCRUD.</summary>
     public override Task<int> DeleteAsync(Customer customer, EzHookContext ctx)
     {
         customer.IsDeleted = true;
-        return ctx.Session!.UpdateAsync(customer);
+        return ctx.Data.UpdateAsync(customer);
     }
 
     public override Task AfterDeleteAsync(Customer customer, EzHookContext ctx) =>
-        ctx.Crud.InsertAsync(new AuditLog { Entity = "customer", EntityId = customer.Id, Action = "soft-delete", Actor = ctx.UserId });
+        ctx.Data.InsertAsync(new AuditLog { Entity = "customer", EntityId = customer.Id, Action = "soft-delete", Actor = ctx.UserId });
+}
+
+/// <summary>Fluent EF Core mapping that mirrors the SimpleCRUD attributes (including CreatedBy ignore-on-update).</summary>
+public sealed class CrmDbContext : DbContext
+{
+    public CrmDbContext(DbContextOptions<CrmDbContext> options) : base(options) { }
+
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+
+    protected override void OnModelCreating(ModelBuilder model)
+    {
+        model.Entity<Customer>(e =>
+        {
+            e.ToTable("customers");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.Name).HasColumnName("full_name");
+            e.Property(x => x.Email).HasColumnName("email");
+            e.Property(x => x.Country).HasColumnName("country");
+            e.Property(x => x.OwnerId).HasColumnName("owner_id");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by")
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+        });
+
+        model.Entity<Order>(e =>
+        {
+            e.ToTable("orders");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.CustomerId).HasColumnName("customer_id");
+            e.Property(x => x.Total).HasColumnName("total");
+        });
+
+        model.Entity<AuditLog>(e =>
+        {
+            e.ToTable("audit_log");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.Entity).HasColumnName("entity");
+            e.Property(x => x.EntityId).HasColumnName("entity_id");
+            e.Property(x => x.Action).HasColumnName("action");
+            e.Property(x => x.Actor).HasColumnName("actor");
+        });
+
+        model.Entity<OrderLine>(e =>
+        {
+            e.ToTable("order_lines");
+            e.HasKey(x => new { x.OrderId, x.LineNo });
+            e.Property(x => x.OrderId).HasColumnName("order_id");
+            e.Property(x => x.LineNo).HasColumnName("line_no");
+            e.Property(x => x.Product).HasColumnName("product");
+            e.Property(x => x.Qty).HasColumnName("qty");
+        });
+    }
+}
+
+public interface IEngineUnderTest
+{
+    string Name { get; }
+    void Configure(EzServiceExtensionBuilder builder);
+}
+
+public sealed class SimpleCrudEngineUnderTest : IEngineUnderTest
+{
+    public static readonly SimpleCrudEngineUnderTest Instance = new();
+    public string Name => "simplecrud";
+    public void Configure(EzServiceExtensionBuilder builder) => builder.UseSimpleCrud();
+}
+
+public sealed class EfCoreEngineUnderTest : IEngineUnderTest
+{
+    public static readonly EfCoreEngineUnderTest Instance = new();
+    public string Name => "efcore";
+    public void Configure(EzServiceExtensionBuilder builder) => builder.UseEfCore<CrmDbContext>();
 }
 
 public static class Schema
@@ -126,5 +214,11 @@ public static class Schema
         INSERT INTO customers (full_name, email, country, owner_id) VALUES ('Bob', 'bob@example.com', 'EU', 'u2');
         INSERT INTO orders (customer_id, total) VALUES (1, 10.26);
         INSERT INTO products (name) VALUES ('Widget');
+        """;
+
+    public const string OrderLines = """
+        CREATE TABLE order_lines (order_id INTEGER NOT NULL REFERENCES orders(id), line_no INTEGER NOT NULL,
+                                  product TEXT NOT NULL, qty INTEGER NOT NULL, PRIMARY KEY (order_id, line_no));
+        INSERT INTO order_lines (order_id, line_no, product, qty) VALUES (1, 1, 'Widget', 2);
         """;
 }

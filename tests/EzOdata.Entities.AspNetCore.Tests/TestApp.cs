@@ -13,7 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace EzOdata.SimpleCrud.AspNetCore.Tests;
+namespace EzOdata.Entities.AspNetCore.Tests;
 
 /// <summary>
 /// A host app exactly as the ez-odata README shows it (AddEzOData + MapEzOData), plus ExtendEzOData.
@@ -33,15 +33,19 @@ public static class TestApp
                     s.AddRouting();
                     s.AddAuthorization();
                     s.AddAuthentication("Headers").AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("Headers", _ => { });
-                    s.AddEzOData(ez);             // stock ez-odata, unchanged
-                    services?.Invoke(s);          // ExtendEzOData(...) goes here
+                    s.AddEzOData(ez);
+                    services?.Invoke(s);
                 });
                 web.Configure(app =>
                 {
                     app.UseRouting();
                     app.UseAuthentication();
                     app.UseAuthorization();
-                    app.UseEndpoints(e => e.MapEzOData("/api/odata"));
+                    app.UseEndpoints(e =>
+                    {
+                        e.MapEzOData("/api/odata");
+                        e.MapEzODataRest("/api/rest");
+                    });
                 });
             })
             .StartAsync();

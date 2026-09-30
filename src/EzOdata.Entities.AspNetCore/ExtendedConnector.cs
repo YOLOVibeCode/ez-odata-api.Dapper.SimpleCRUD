@@ -1,18 +1,15 @@
 using System.Collections.Concurrent;
-using System.Data;
 using System.Data.Common;
 using System.Security.Claims;
 using EzOdata.Connectors.Abstractions;
 using EzOdata.Core;
-using Dapper;
 using EzOdata.Core.Query;
-using EzOdata.SimpleCrud;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>All configured extensions, by service name.</summary>
 internal sealed class EzExtensionSet
@@ -21,7 +18,7 @@ internal sealed class EzExtensionSet
 
     public Dictionary<string, ServiceExtension> Services { get; }
 
-    public const string Marker = "+simplecrud:";
+    public const string Marker = "+entities:";
 
     public static string ConnectorTypeFor(string original, string service) => original + Marker + service;
 }
@@ -30,10 +27,11 @@ internal sealed class EzExtensionSet
 /// Decorates ez-odata's runtime resolver: an extended service gets the overlaid schema and a
 /// per-service connector type, which <see cref="ExtendedConnectorRegistry"/> resolves to the wrapped connector.
 /// </summary>
-internal sealed class ExtendedRuntimeResolver(IServiceRuntimeResolver inner, EzExtensionSet set) : IServiceRuntimeResolver
+internal sealed class ExtendedRuntimeResolver(IServiceRuntimeResolver inner, EzExtensionSet set, IServiceProvider services) : IServiceRuntimeResolver
 {
     public async Task<ServiceRuntime?> ResolveAsync(string serviceName, CancellationToken ct)
     {
+        _ = services;
         var runtime = await inner.ResolveAsync(serviceName, ct);
         if (runtime is null || !set.Services.TryGetValue(serviceName, out var extension)) return runtime;
 
@@ -42,7 +40,7 @@ internal sealed class ExtendedRuntimeResolver(IServiceRuntimeResolver inner, EzE
         {
             ConnectorType = EzExtensionSet.ConnectorTypeFor(runtime.ConnectorType, extension.Name),
             Schema = model.Schema,
-            SchemaVersion = runtime.SchemaVersion + "+simplecrud",
+            SchemaVersion = runtime.SchemaVersion + "+entities",
         };
     }
 }
@@ -71,7 +69,7 @@ internal sealed class ExtendedConnectorRegistry(IConnectorRegistry inner, EzExte
                 stock.Tester,
                 stock.Introspector,
                 new ExtendedQueryExecutor(stock.Reader, runtime),
-                stock.Writer is null ? null : new SimpleCrudWriteExecutor(stock.Writer, runtime),
+                stock.Writer is null ? null : new EntityWriteExecutor(stock.Writer, runtime),
                 stock.Dialect);
         })!;
 
@@ -85,18 +83,20 @@ internal sealed class ExtensionRuntime(ServiceExtension extension, ISqlDialect d
     private readonly IHttpContextAccessor? _http = root.GetService<IHttpContextAccessor>();
 
     public ILogger Logger { get; } =
-        root.GetService<ILoggerFactory>()?.CreateLogger("EzOdata.SimpleCrud.AspNetCore") ?? NullLogger.Instance;
+        root.GetService<ILoggerFactory>()?.CreateLogger("EzOdata.Entities.AspNetCore") ?? NullLogger.Instance;
 
     public ServiceExtension Extension => extension;
     public ISqlDialect Dialect => dialect;
+    public IServiceProvider Root => root;
 
     public (ITableOperation Operation, EzHookContext Context) Begin(
-        ServiceModel model, BoundTable table, EzOperation operation, SimpleCrudSession? session, CancellationToken ct)
+        ServiceModel model, BoundTable table, EzOperation operation, IEntityStore? store, CancellationToken ct)
     {
         var http = _http?.HttpContext;
         var services = http?.RequestServices ?? root;
         var user = http?.User ?? new ClaimsPrincipal(new ClaimsIdentity());
-        var context = new EzHookContext(extension.Name, table.Binding, operation, user, services, model.Engine, session, () => model.Client, ct);
+        var context = new EzHookContext(extension.Name, table.Binding, operation, user, services, model.Engine, store,
+            () => model.ReadStore(services), ct);
         return (table.Registration.Begin(services, table.Binding), context);
     }
 
@@ -148,10 +148,10 @@ internal sealed class ExtendedQueryExecutor(IQueryExecutor inner, ExtensionRunti
 }
 
 /// <summary>
-/// Writes to entity-mapped tables go through SimpleCRUD (on this service's isolated engine) and the
-/// table's handler, in one transaction; other tables use the stock ez-odata writer untouched.
+/// Writes to entity-mapped tables go through the configured engine and the table's handler, in one
+/// transaction; other tables use the stock ez-odata writer untouched.
 /// </summary>
-internal sealed class SimpleCrudWriteExecutor(IWriteExecutor inner, ExtensionRuntime runtime) : IWriteExecutor
+internal sealed class EntityWriteExecutor(IWriteExecutor inner, ExtensionRuntime runtime) : IWriteExecutor
 {
     public async Task<WriteResult> WriteAsync(WriteExecution execution, CancellationToken ct) =>
         (await WriteAtomicAsync([execution], ct))[0];
@@ -165,7 +165,7 @@ internal sealed class SimpleCrudWriteExecutor(IWriteExecutor inner, ExtensionRun
         if (model is null || tables.All(t => t is null)) return await inner.WriteAtomicAsync(executions, ct);
         if (tables.Any(t => t is null))
         {
-            throw new NotSupportedQueryException("A $batch changeset cannot yet mix SimpleCRUD-extended and plain tables.");
+            throw new NotSupportedQueryException("A $batch changeset cannot yet mix entity-mapped and plain tables.");
         }
 
         for (var attempt = 1; ; attempt++)
@@ -178,52 +178,68 @@ internal sealed class SimpleCrudWriteExecutor(IWriteExecutor inner, ExtensionRun
             {
                 throw ExtensionRuntime.Translate(ex);
             }
-            catch (DbException ex) when (ProviderConnections.IsTransientConflict(ex) && attempt < MaxAttempts)
+            catch (Exception ex) when (FindDb(ex) is { } db && ProviderConnections.IsTransientConflict(db) && attempt < MaxAttempts)
             {
-                // Deadlock / serialization failure: the transaction rolled back; re-run the whole unit.
                 await Task.Delay(Random.Shared.Next(10, 40) * attempt, ct);
             }
-            catch (DbException ex)
+            catch (Exception ex) when (FindDb(ex) is { } db)
             {
-                throw ProviderConnections.Map(ex);
+                throw ProviderConnections.Map(db);
             }
         }
     }
 
     private const int MaxAttempts = 3;
 
+    private static DbException? FindDb(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is DbException db) return db;
+        }
+
+        return null;
+    }
+
     private async Task<IReadOnlyList<WriteResult>> AttemptAsync(
         ServiceModel model, List<BoundTable?> tables, IReadOnlyList<WriteExecution> executions, CancellationToken ct)
     {
         await using var connection = model.CreateConnection();
         await connection.OpenAsync(ct);
-        using var session = new SimpleCrudSession(model.Engine, connection, null, executions[0].Options.CommandTimeoutSeconds);
 
         var steps = new List<(WriteExecution Execution, ITableOperation Operation, EzHookContext Context, FilterNode? ReadFilter)>();
+        // Open a dummy store after we know isolation — first collect BeforeRead without a store (reads don't need it).
+        var pending = new List<(WriteExecution Execution, BoundTable Table, EzOperation Kind)>();
         for (var i = 0; i < executions.Count; i++)
         {
-            var (operation, context) = runtime.Begin(model, tables[i]!, Kind(executions[i].Write.Kind), session, ct);
-            FilterNode? readFilter = null;
-            if (executions[i].Write.Kind != WriteKind.Insert)
-            {
-                readFilter = (await operation.BeforeReadAsync(
-                    new QueryRequest { ServiceName = executions[i].Write.ServiceName, Table = executions[i].Write.Table }, context)).Filter;
-            }
-
-            steps.Add((executions[i], operation, context, readFilter));
+            pending.Add((executions[i], tables[i]!, Kind(executions[i].Write.Kind)));
         }
 
-        // A write gated on "can this caller see the row" must not be separable from its check by a
-        // concurrent change. PostgreSQL: REPEATABLE READ (a concurrent change to the checked row makes our
-        // write fail with 40001; SERIALIZABLE would also abort on unrelated rows). Others: SERIALIZABLE
-        // (key-range / shared row locks; SQLite locks the database).
-        var guarded = steps.Any(s => s.ReadFilter is not null || s.Execution.Write.Precondition is not null
-                                     || s.Execution.Write.InsertVisibilityFilter is not null);
-        session.BeginTransaction(!guarded ? IsolationLevel.Unspecified
-            : model.Dialect == SimpleCRUD.Dialect.PostgreSQL ? IsolationLevel.RepeatableRead
-            : IsolationLevel.Serializable);
+        var readFilters = new FilterNode?[pending.Count];
+        for (var i = 0; i < pending.Count; i++)
+        {
+            if (pending[i].Execution.Write.Kind == WriteKind.Insert) continue;
+            var (op, ctx) = runtime.Begin(model, pending[i].Table, EzOperation.Read, null, ct);
+            readFilters[i] = (await op.BeforeReadAsync(
+                new QueryRequest { ServiceName = pending[i].Execution.Write.ServiceName, Table = pending[i].Execution.Write.Table }, ctx)).Filter;
+        }
 
-        var kit = new WriteToolkit(runtime.Dialect, connection, session, ct);
+        var guarded = pending.Zip(readFilters, (p, f) => (p, f)).Any(x =>
+            x.f is not null || x.p.Execution.Write.Precondition is not null
+            || x.p.Execution.Write.InsertVisibilityFilter is not null);
+
+        var isolation = ProviderConnections.IsolationFor(model.Runtime.ConnectorType, guarded);
+        var request = new EntityStoreRequest(model.Runtime, connection, runtime.Root, model.Maps,
+            executions[0].Options.CommandTimeoutSeconds);
+        await using var store = await model.Engine.OpenStoreAsync(request, isolation, ct);
+
+        for (var i = 0; i < pending.Count; i++)
+        {
+            var (operation, context) = runtime.Begin(model, pending[i].Table, pending[i].Kind, store, ct);
+            steps.Add((pending[i].Execution, operation, context, readFilters[i]));
+        }
+
+        var kit = new WriteToolkit(runtime.Dialect, connection, store.Transaction, ct);
         var results = new List<WriteResult>(steps.Count);
         try
         {
@@ -232,13 +248,13 @@ internal sealed class SimpleCrudWriteExecutor(IWriteExecutor inner, ExtensionRun
                 results.Add(await step.Operation.WriteAsync(step.Execution, step.ReadFilter, kit, step.Context));
             }
 
-            session.Commit();
+            store.Commit();
             foreach (var step in steps) await step.Context.RunCommittedCallbacksAsync(runtime.Logger);
             return results;
         }
         catch
         {
-            session.Rollback();
+            store.Rollback();
             throw;
         }
     }

@@ -1,25 +1,28 @@
-# EzOdata + Dapper.SimpleCRUD: Specification
+# EzOdata + Dapper.SimpleCRUD / EF Core: Specification
 
-**Status:** v1.0, describes release 1.0.0 · **Supersedes:** Draft v0.2 (POCO-only schema, one
-dialect per process, upstream ez-odata changes) · **Owner:** Noctusoft, Inc. · **License:** Apache-2.0
+**Status:** v2.0, describes release 2.0.0 · **Supersedes:** v1.0 (SimpleCRUD-only writes) ·
+**Owner:** Noctusoft, Inc. · **License:** Apache-2.0
 
 | Building block | Role |
 |---|---|
 | [ez-odata-api](https://github.com/YOLOVibeCode/ez-odata-api) 1.0.x, **unmodified** | Instant OData v4 / REST API over a database, with RBAC, row filters, field policies and docs |
-| [Dapper.SimpleCRUD](https://github.com/ericdc1/Dapper.SimpleCRUD) 2.3.x, **unmodified** | The entity model and the write engine for every table you choose to take over |
+| [Dapper.SimpleCRUD](https://github.com/ericdc1/Dapper.SimpleCRUD) 2.3.x, **unmodified** | Optional write engine (isolated per dialect) |
+| [EF Core](https://learn.microsoft.com/ef/core/) 10, **unmodified** | Optional write engine (`DbContext` on the shared connection + transaction) |
 
 ---
 
 ## 1. Definition
 
-Two NuGet packages:
+Four NuGet packages:
 
 - **`EzOdata.SimpleCrud`** makes Dapper.SimpleCRUD instance-based. You get one isolated, lazily
   created SimpleCRUD engine per dialect, so any number of databases and dialects can run in one
-  process, next to the application's own SimpleCRUD code.
-- **`EzOdata.SimpleCrud.AspNetCore`** follows the DreamFactory model on ez-odata. Install it and the
-  API is live for every table at once. Then take over any table with an existing SimpleCRUD entity and
-  typed hooks to validate, stamp, audit, soft-delete, or replace an operation outright.
+  process, next to the application's own SimpleCRUD code. Unchanged from 1.0.
+- **`EzOdata.Entities.AspNetCore`** follows the DreamFactory model on ez-odata: instant API for every
+  table, then take over any table with an entity, typed hooks, and `ctx.Data`. Reads stay on ez-odata's
+  compiler. Writes go through `IEntityEngine`.
+- **`EzOdata.SimpleCrud.AspNetCore`** is the SimpleCRUD engine: `.UseSimpleCrud()`.
+- **`EzOdata.EntityFrameworkCore.AspNetCore`** is the EF Core engine: `.UseEfCore<TContext>()`.
 
 ## 2. Problems solved
 
@@ -96,6 +99,7 @@ Verified by `Delegates_are_compiled_once_per_operation_and_type`, `Exceptions_su
 ```csharp
 builder.Services.AddEzOData(ez => { ez.AddService("crm", s => s.UsePostgreSql(spec)); /* roles */ });  // stock
 builder.Services.ExtendEzOData(x => x.Service("crm", crm => crm
+    .UseSimpleCrud()                                                      // or .UseEfCore<CrmDbContext>()
     .Table<Customer, CustomerHandler>()                                   // handler class (DI)
     .Table<Order>(t => t.BeforeInsert((o, ctx) => { if (o.Total <= 0) ctx.Reject("..."); }))));
 app.MapEzOData("/api/odata");                                             // stock
@@ -118,9 +122,9 @@ app.MapEzOData("/api/odata");                                             // sto
 |---|---|---|
 | X-1 | Tables without an entity keep the stock instant API, including writes | `Tables_without_an_entity_keep_the_stock_instant_api` |
 | X-2 | Reads use ez-odata's compiled, parameterized SQL (full `$filter`, `$expand`, `$apply`, `$count`, paging). `BeforeRead` can only AND predicates, and `AfterRead` post-processes rows | `Reads_apply_role_row_filters_and_handler_filters_together`, `Expand_and_after_read_hooks_work_on_extended_tables` |
-| X-3 | POST binds a new `T`, runs the hooks, calls SimpleCRUD `Insert`, and re-reads the row in the same transaction | `Insert_runs_through_SimpleCRUD_and_the_handler` |
+| X-3 | POST binds a new `T`, runs the hooks, calls `ctx.Data.InsertAsync`, and re-reads the row in the same transaction | `Insert_runs_through_the_engine_and_the_handler` |
 | X-4 | PATCH runs `Get`, merges only the sent fields, then `Update`. PUT replaces | `Patch_changes_only_what_was_sent` |
-| X-5 | Hooks and their side writes (`ctx.Crud`) share the API write's transaction, and any rejection rolls everything back | `Hook_rejection_is_a_400_and_nothing_is_written`, `Side_writes_in_hooks_roll_back_with_the_api_write` |
+| X-5 | Hooks and their side writes (`ctx.Data`) share the API write's transaction, and any rejection rolls everything back | `Hook_rejection_is_a_400_and_nothing_is_written`, `Side_writes_in_hooks_roll_back_with_the_api_write` |
 | X-6 | `Reject` returns 400 and `Forbid` returns 403. Provider errors map to ez's taxonomy (for example, unique → 409) | `Handlers_can_forbid_an_update_based_on_the_original_row`, `Database_constraint_violations_map_to_the_engines_error_codes` |
 | X-7 | Role row filters gate update and delete. Inserted rows must satisfy them, or the write rolls back with 403 | `Row_filters_protect_updates_and_deletes`, `Insert_outside_the_callers_row_filter_is_403_and_rolled_back` |
 | X-8 | Rows hidden by `BeforeRead` cannot be updated or deleted | `Delete_can_be_overridden_as_a_soft_delete` |
@@ -130,6 +134,9 @@ app.MapEzOData("/api/odata");                                             // sto
 | X-12 | Composite primary keys, as SimpleCRUD models them (`[Key, Required]` parts): create, read, update, delete and conflicts by full key | `Composite_keys_work_end_to_end_through_SimpleCRUD` |
 | X-14 | `ctx.OnCommitted(...)` runs once after commit, never after rollback, and a failing callback doesn't undo a committed write | `OnCommitted_runs_once_after_commit_and_never_after_rollback` |
 | X-13 | `UsePropertyNames()`: entity property names become the API contract (payloads, `$filter`, `$orderby`, `$metadata`, row filters), with foreign keys renamed consistently across tables | `Entity_property_names_become_the_api_contract`, `Row_filters_and_expand_follow_the_renamed_columns` |
+| X-15 | SimpleCRUD and EF Core are interchangeable: one abstract suite, two derived classes, handlers use `ctx.Data` | `SimpleCrud_*` / `EfCore_*` suites |
+| X-16 | A service with no `.UseSimpleCrud()` / `.UseEfCore<T>()` fails startup | `Missing_engine_stops_startup` |
+| X-17 | EF Core refuses retrying strategies, owned types, inheritance mapping, and unsupported key types; value converters warn | `EfCoreGuardTests` |
 
 ### 6.4 Consistency
 
@@ -150,11 +157,12 @@ small tables, and `SERIALIZABLE` elsewhere. Deadlocks and serialization failures
 
 ## 8. Supported matrix
 
-| Dimension | v1 |
+| Dimension | v2 |
 |---|---|
 | Dialects | SQL Server, PostgreSQL, MySQL/MariaDB, SQLite. All four are exercised concurrently; the SQL Server tests use Azure SQL Edge on ARM |
+| Write engines | SimpleCRUD (isolated) and EF Core 10 (shared connection + transaction) |
 | Hosts | ASP.NET Core on .NET 10 (extension). The facade targets .NET 8+ (isolated) and netstandard2.0 (shared) |
-| Keys | int, long, short, Guid, string, including composite keys (`[Key, Required]` parts) |
+| Keys | int, long, short, Guid, string, including composite keys (`[Key, Required]` parts on SimpleCRUD) |
 
 ## 9. Limits and roadmap
 
@@ -167,8 +175,11 @@ small tables, and `SERIALIZABLE` elsewhere. Deadlocks and serialization failures
 
 ## 10. Quality
 
-- 22 facade tests and 20 end-to-end tests, run against SimpleCRUD 2.3.0 and 2.4.0-beta1, plus a smoke test of the packed packages. They run against real PostgreSQL 16, MySQL 8.4,
-  SQL Server (Azure SQL Edge) and SQLite via Testcontainers, and the full suite passed twice in a row.
+- Facade tests plus a parameterized entity suite (SimpleCRUD and EF Core), run against SimpleCRUD
+  2.3.0 and 2.4.0-beta1, plus a smoke test of the packed packages. `./compare.sh` writes TRX, timings
+  and `report.html`. `./demo-swagger.sh` looks up OpenAPI, reads two sample databases, and times both.
+  Tests run against real PostgreSQL 16, MySQL 8.4, SQL Server (Azure SQL Edge) and
+  SQLite via Testcontainers.
 - Every requirement in §5–6 names its test.
 - Sample app: `samples/EzOdata.SimpleCrud.Sample`, verified over HTTP.
 

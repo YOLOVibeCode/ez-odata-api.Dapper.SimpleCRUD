@@ -8,7 +8,7 @@
     <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1608</WarningsNotAsErrors>
     <RootNamespace>$(MSBuildProjectName)</RootNamespace>
     <!-- Set with -p:EzScVersion=...; a global -p:Version would also re-version the referenced ez-odata projects -->
-    <EzScVersion Condition="'$(EzScVersion)' == ''">1.0.1</EzScVersion>
+    <EzScVersion Condition="'$(EzScVersion)' == ''">2.0.0</EzScVersion>
     <Version>$(EzScVersion)</Version>
     <Authors>Noctusoft, Inc.</Authors>
     <Company>Noctusoft, Inc.</Company>
@@ -17,7 +17,7 @@
     <RepositoryUrl>https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD</PackageProjectUrl>
-    <PackageTags>dapper;simplecrud;odata;rest;ez-odata;multi-database;dialect</PackageTags>
+    <PackageTags>dapper;simplecrud;efcore;entityframework;odata;rest;ez-odata;multi-database;dialect</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>false</IsPackable>
 
@@ -27,8 +27,9 @@
       (and -p:EzOdataRoot=path/to/ez-odata-api/ if it is not a sibling folder).
     -->
     <EzOdataSource Condition="'$(EzOdataSource)' == ''">package</EzOdataSource>
+    <EzOdataRoot Condition="'$(EzOdataRoot)' == '' AND Exists('$(MSBuildThisFileDirectory)..\ez-odata-api-1.0.6\')">$(MSBuildThisFileDirectory)..\ez-odata-api-1.0.6\</EzOdataRoot>
     <EzOdataRoot Condition="'$(EzOdataRoot)' == ''">$(MSBuildThisFileDirectory)..\ez-odata-api\</EzOdataRoot>
-    <EzOdataVersion Condition="'$(EzOdataVersion)' == ''">1.0.5</EzOdataVersion>
+    <EzOdataVersion Condition="'$(EzOdataVersion)' == ''">1.0.6</EzOdataVersion>
 
     <!-- Minimum Dapper.SimpleCRUD the packages depend on; CI also tests newer releases (-p:SimpleCrudVersion=...). -->
     <SimpleCrudVersion Condition="'$(SimpleCrudVersion)' == ''">2.3.0</SimpleCrudVersion>

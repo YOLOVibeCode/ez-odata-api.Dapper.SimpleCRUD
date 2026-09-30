@@ -1,6 +1,7 @@
-# EzOdata + Dapper.SimpleCRUD
+# EzOdata + SimpleCRUD / EF Core
 
-Two packages built on [Dapper.SimpleCRUD](https://github.com/ericdc1/Dapper.SimpleCRUD), which they use unmodified.
+Packages that take over [ez-odata-api](https://github.com/YOLOVibeCode/ez-odata-api) tables with
+[Dapper.SimpleCRUD](https://github.com/ericdc1/Dapper.SimpleCRUD) or EF Core, both used unmodified.
 
 ## EzOdata.SimpleCrud: several SimpleCRUD dialects in one process
 
@@ -23,21 +24,22 @@ Your existing SimpleCRUD POCOs and attributes work unchanged. The overhead is ab
 SimpleCRUD call. Supports SimpleCRUD 2.3.x and 2.4.x on .NET 8+; on netstandard2.0 it falls back to
 one dialect per process.
 
-## EzOdata.SimpleCrud.AspNetCore: instant OData/REST API with SimpleCRUD overrides
+## Instant OData/REST API with a SimpleCRUD or EF Core write engine
 
 [ez-odata-api](https://github.com/YOLOVibeCode/ez-odata-api) serves every table of a database as a
-governed OData v4 / REST API. This package lets you take over any table with an ordinary SimpleCRUD
-entity and typed hooks for validation, auditing, soft delete, or replacing an operation outright.
+governed OData v4 / REST API. `EzOdata.Entities.AspNetCore` lets you take over any table with an
+entity and typed hooks. Pick the write engine per service:
 
 ```csharp
-builder.Services.AddEzOData(ez => ez.AddService("crm", s => s.UsePostgreSql(connection)));  // stock ez-odata
+builder.Services.AddEzOData(ez => ez.AddService("crm", s => s.UsePostgreSql(connection)));
 builder.Services.ExtendEzOData(x => x.Service("crm", crm => crm
-    .Table<Customer, CustomerHandler>()                                                        // handler class (DI)
+    .UseSimpleCrud()                       // or .UseEfCore<CrmDbContext>()
+    .Table<Customer, CustomerHandler>()
     .Table<Order>(t => t.BeforeInsert((o, ctx) => { if (o.Total <= 0) ctx.Reject("Total must be positive."); }))));
 app.MapEzOData("/api/odata");
 ```
 
-- Writes go through SimpleCRUD in one transaction, and hooks share it.
+- Writes go through the chosen engine in one transaction; hooks share it via `ctx.Data`.
 - ez-odata's role rules and row filters still apply, and hooks can't widen them.
 - Composite keys are supported, and `UsePropertyNames()` exposes C# property names in the API.
 - `ctx.OnCommitted(...)` runs side effects only after a successful commit.

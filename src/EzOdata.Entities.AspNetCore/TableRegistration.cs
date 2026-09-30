@@ -2,7 +2,7 @@ using EzOdata.Connectors.Abstractions;
 using EzOdata.Core;
 using EzOdata.Core.Query;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>Non-generic handle on a <c>Table&lt;T&gt;</c> registration.</summary>
 internal abstract class TableRegistration
@@ -40,7 +40,7 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
         public async Task<WriteResult> WriteAsync(WriteExecution execution, FilterNode? readFilter, WriteToolkit kit, EzHookContext ctx)
         {
             var write = execution.Write;
-            var session = ctx.Session!;
+            var store = ctx.Data;
 
             switch (write.Kind)
             {
@@ -51,7 +51,7 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
                     {
                         if (record.Children.Count > 0)
                         {
-                            throw new NotSupportedQueryException("Deep insert into a SimpleCRUD-extended table is not supported yet.");
+                            throw new NotSupportedQueryException("Deep insert into an entity-mapped table is not supported yet.");
                         }
 
                         var entity = new T();
@@ -82,14 +82,14 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
                     var (keyFilterValue, key) = Key(write);
                     if (!await VisibleAsync(execution, kit, keyFilterValue, write.Precondition, readFilter)) return new WriteResult(0, []);
 
-                    var original = await session.GetAsync<T>(key);
+                    var original = await store.GetAsync<T>(key);
                     if (original is null) return new WriteResult(0, []);
 
                     var entity = Clone(original);
                     Apply(entity, write.Records[0].Values, write.Kind);
                     await handler.BeforeUpdateAsync(entity, original, ctx);
 
-                    var affected = await handler.UpdateAsync(entity, ctx);
+                    var affected = await handler.UpdateAsync(entity, original, ctx);
                     if (affected == 0) return new WriteResult(0, []);
 
                     var row = await kit.ReadByKeyAsync(execution, binding, keyFilterValue);
@@ -102,7 +102,7 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
                     var (keyFilterValue, key) = Key(write);
                     if (!await VisibleAsync(execution, kit, keyFilterValue, write.Precondition, readFilter)) return new WriteResult(0, []);
 
-                    var entity = await session.GetAsync<T>(key);
+                    var entity = await store.GetAsync<T>(key);
                     if (entity is null) return new WriteResult(0, []);
 
                     await handler.BeforeDeleteAsync(entity, ctx);
@@ -124,7 +124,7 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
         }
 
         /// <summary>
-        /// The URL key as (column → value) for SQL, plus what SimpleCRUD's <c>Get</c> expects: the value for a
+        /// The URL key as (column → value) for SQL, plus what Get expects: the value for a
         /// single key, or an instance carrying the key properties for a composite key.
         /// </summary>
         private (IReadOnlyDictionary<string, object?> FilterValues, object EntityKey) Key(WriteRequest write)
@@ -160,7 +160,6 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
                 var allowed = kind == WriteKind.Insert ? property.IsInsertable : property.IsUpdatable;
                 if (!allowed)
                 {
-                    // PUT null-fills columns the client omitted; skip those, but never silently drop a real value.
                     if (kind == WriteKind.Replace && pair.Value is null) continue;
                     throw new ConnectorException(ErrorCodes.ValidationInvalidValue, kind == WriteKind.Insert
                         ? $"Property '{pair.Key}' cannot be set on insert."

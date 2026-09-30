@@ -1,11 +1,9 @@
 using System.Data.Common;
 using EzOdata.Connectors.Abstractions;
-using EzOdata.SimpleCrud;
-using Microsoft.Extensions.DependencyInjection;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
-/// <summary>Configures which ez-odata services get SimpleCRUD entities and hooks.</summary>
+/// <summary>Configures which ez-odata services get entity-mapped tables and hooks.</summary>
 public sealed class EzExtensionBuilder
 {
     internal Dictionary<string, ServiceExtension> Services { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -30,8 +28,11 @@ public sealed class EzServiceExtensionBuilder
 
     internal EzServiceExtensionBuilder(ServiceExtension extension) => _extension = extension;
 
+    /// <summary>The underlying service configuration (engine packages use this).</summary>
+    internal ServiceExtension Extension => _extension;
+
     /// <summary>
-    /// Override how SimpleCRUD connects (default: built from the service's ConnectionSpec, like ez-odata's connectors).
+    /// Override how the write engine connects (default: built from the service's ConnectionSpec, like ez-odata's connectors).
     /// </summary>
     public EzServiceExtensionBuilder UseConnection(Func<ConnectionSpec, DbConnection> factory)
     {
@@ -39,10 +40,10 @@ public sealed class EzServiceExtensionBuilder
         return this;
     }
 
-    /// <summary>Per-service naming conventions (installed into this service's isolated SimpleCRUD engine).</summary>
-    public EzServiceExtensionBuilder UseNaming(SimpleCrudNaming naming)
+    /// <summary>The write engine for this service. Required: call <c>UseSimpleCrud()</c> or <c>UseEfCore&lt;TContext&gt;()</c>.</summary>
+    public EzServiceExtensionBuilder UseEngine(IEntityEngine engine)
     {
-        _extension.Naming = naming;
+        _extension.Engine = engine;
         return this;
     }
 
@@ -57,8 +58,8 @@ public sealed class EzServiceExtensionBuilder
     }
 
     /// <summary>
-    /// Take over a table with a SimpleCRUD entity (mapped by SimpleCRUD's own attributes) and optional inline hooks.
-    /// Writes go through SimpleCRUD; columns the entity doesn't write become read-only in the API.
+    /// Take over a table with an entity and optional inline hooks.
+    /// Writes go through the configured engine; columns the entity doesn't write become read-only in the API.
     /// </summary>
     public EzServiceExtensionBuilder Table<T>(Action<EzTableHooks<T>>? hooks = null) where T : class, new()
     {
@@ -72,7 +73,10 @@ public sealed class EzServiceExtensionBuilder
     /// <summary>Take over a table with a handler class (created per operation from request services, so it can inject dependencies).</summary>
     public EzServiceExtensionBuilder Table<T, THandler>() where T : class, new() where THandler : EzTableHandler<T>
     {
-        _extension.Register(new TableRegistration<T>(sp => ActivatorUtilities.GetServiceOrCreateInstance<THandler>(sp)));
+        _extension.Register(new TableRegistration<T>(sp => ActivatorUtilitiesCreate<THandler>(sp)));
         return this;
     }
+
+    private static THandler ActivatorUtilitiesCreate<THandler>(IServiceProvider sp) =>
+        Microsoft.Extensions.DependencyInjection.ActivatorUtilities.GetServiceOrCreateInstance<THandler>(sp);
 }

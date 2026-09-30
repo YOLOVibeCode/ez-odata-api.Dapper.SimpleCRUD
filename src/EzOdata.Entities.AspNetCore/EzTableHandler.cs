@@ -1,10 +1,10 @@
 using EzOdata.Core.Query;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>
 /// Override point for one table, the typed equivalent of DreamFactory's pre/post-process scripts.
-/// Every member has a working default (plain SimpleCRUD), so override only what you need.
+/// Every member has a working default (the configured write engine), so override only what you need.
 /// Handlers are created from request services, so constructor injection works.
 /// </summary>
 /// <remarks>
@@ -20,12 +20,11 @@ public abstract class EzTableHandler<T> where T : class, new()
     /// <summary>Adjust result rows (mask, format). Only change values of columns already present.</summary>
     public virtual Task AfterReadAsync(IReadOnlyList<Row> rows, EzHookContext ctx) => Task.CompletedTask;
 
-    /// <summary>Validate or default a new entity before SimpleCRUD inserts it. <see cref="EzHookContext.Reject"/> fails the request.</summary>
+    /// <summary>Validate or default a new entity before it is inserted. <see cref="EzHookContext.Reject"/> fails the request.</summary>
     public virtual Task BeforeInsertAsync(T entity, EzHookContext ctx) => Task.CompletedTask;
 
-    /// <summary>Performs the insert; returns the new key. Default: SimpleCRUD <c>InsertAsync</c>.</summary>
-    public virtual Task<object?> InsertAsync(T entity, EzHookContext ctx) => ctx.Engine.InsertForKeyAsync(
-        ctx.Session!.Connection, entity, ctx.Engine.Describe<T>().Keys[0].Property.PropertyType, ctx.Session.Transaction);
+    /// <summary>Performs the insert; returns the new key. Default: <see cref="EzHookContext.Data"/>.</summary>
+    public virtual Task<object?> InsertAsync(T entity, EzHookContext ctx) => ctx.Data.InsertAsync(entity);
 
     /// <summary>After the insert, inside the transaction (the key is set). Use <see cref="EzHookContext.OnCommitted(Func{Task})"/> for external side effects.</summary>
     public virtual Task AfterInsertAsync(T entity, EzHookContext ctx) => Task.CompletedTask;
@@ -35,8 +34,8 @@ public abstract class EzTableHandler<T> where T : class, new()
     /// <param name="ctx">The hook context.</param>
     public virtual Task BeforeUpdateAsync(T entity, T original, EzHookContext ctx) => Task.CompletedTask;
 
-    /// <summary>Performs the update; returns rows affected. Default: SimpleCRUD <c>UpdateAsync</c>.</summary>
-    public virtual Task<int> UpdateAsync(T entity, EzHookContext ctx) => ctx.Session!.UpdateAsync(entity);
+    /// <summary>Performs the update; returns rows affected. Default: <see cref="EzHookContext.Data"/> with <paramref name="original"/> so PATCH writes only changed columns.</summary>
+    public virtual Task<int> UpdateAsync(T entity, T original, EzHookContext ctx) => ctx.Data.UpdateAsync(entity, original);
 
     /// <summary>After the update, inside the transaction.</summary>
     public virtual Task AfterUpdateAsync(T entity, EzHookContext ctx) => Task.CompletedTask;
@@ -44,8 +43,8 @@ public abstract class EzTableHandler<T> where T : class, new()
     /// <summary>Before the delete; the entity is the current row.</summary>
     public virtual Task BeforeDeleteAsync(T entity, EzHookContext ctx) => Task.CompletedTask;
 
-    /// <summary>Performs the delete; returns rows affected. Default: SimpleCRUD <c>DeleteAsync</c>. Override for soft delete.</summary>
-    public virtual Task<int> DeleteAsync(T entity, EzHookContext ctx) => ctx.Session!.DeleteAsync(entity);
+    /// <summary>Performs the delete; returns rows affected. Default: <see cref="EzHookContext.Data"/>. Override for soft delete.</summary>
+    public virtual Task<int> DeleteAsync(T entity, EzHookContext ctx) => ctx.Data.DeleteAsync(entity);
 
     /// <summary>After the delete, inside the transaction.</summary>
     public virtual Task AfterDeleteAsync(T entity, EzHookContext ctx) => Task.CompletedTask;
@@ -63,7 +62,7 @@ public sealed class EzTableHooks<T> where T : class, new()
     private readonly List<Func<T, EzHookContext, Task>> _beforeDelete = [];
     private readonly List<Func<T, EzHookContext, Task>> _afterDelete = [];
     private Func<T, EzHookContext, Task<object?>>? _insteadOfInsert;
-    private Func<T, EzHookContext, Task<int>>? _insteadOfUpdate;
+    private Func<T, T, EzHookContext, Task<int>>? _insteadOfUpdate;
     private Func<T, EzHookContext, Task<int>>? _insteadOfDelete;
 
     /// <summary>Rewrite the (already policy-filtered) query, e.g. <c>q.Where(EzFilter.Eq("is_deleted", false))</c>.</summary>
@@ -71,7 +70,7 @@ public sealed class EzTableHooks<T> where T : class, new()
     /// <summary>Adjust each result row (only values of columns already present).</summary>
     public EzTableHooks<T> AfterRead(Action<Row, EzHookContext> hook) { _afterRead.Add(hook); return this; }
 
-    /// <summary>Runs before SimpleCRUD inserts the entity.</summary>
+    /// <summary>Runs before the engine inserts the entity.</summary>
     public EzTableHooks<T> BeforeInsert(Action<T, EzHookContext> hook) => BeforeInsert(Sync(hook));
     /// <inheritdoc cref="BeforeInsert(Action{T, EzHookContext})"/>
     public EzTableHooks<T> BeforeInsert(Func<T, EzHookContext, Task> hook) { _beforeInsert.Add(hook); return this; }
@@ -101,8 +100,8 @@ public sealed class EzTableHooks<T> where T : class, new()
 
     /// <summary>Replace the insert itself; return the new key.</summary>
     public EzTableHooks<T> InsteadOfInsert(Func<T, EzHookContext, Task<object?>> operation) { _insteadOfInsert = operation; return this; }
-    /// <summary>Replace the update itself; return rows affected.</summary>
-    public EzTableHooks<T> InsteadOfUpdate(Func<T, EzHookContext, Task<int>> operation) { _insteadOfUpdate = operation; return this; }
+    /// <summary>Replace the update itself; return rows affected. Receives the changed entity and the original row.</summary>
+    public EzTableHooks<T> InsteadOfUpdate(Func<T, T, EzHookContext, Task<int>> operation) { _insteadOfUpdate = operation; return this; }
     /// <summary>Replace the delete itself (e.g. soft delete); return rows affected.</summary>
     public EzTableHooks<T> InsteadOfDelete(Func<T, EzHookContext, Task<int>> operation) { _insteadOfDelete = operation; return this; }
 
@@ -134,8 +133,8 @@ public sealed class EzTableHooks<T> where T : class, new()
             foreach (var hook in h._beforeUpdate) await hook(entity, original, ctx);
         }
 
-        public override Task<int> UpdateAsync(T entity, EzHookContext ctx) =>
-            h._insteadOfUpdate?.Invoke(entity, ctx) ?? base.UpdateAsync(entity, ctx);
+        public override Task<int> UpdateAsync(T entity, T original, EzHookContext ctx) =>
+            h._insteadOfUpdate?.Invoke(entity, original, ctx) ?? base.UpdateAsync(entity, original, ctx);
         public override Task AfterUpdateAsync(T entity, EzHookContext ctx) => All(h._afterUpdate, entity, ctx);
 
         public override Task BeforeDeleteAsync(T entity, EzHookContext ctx) => All(h._beforeDelete, entity, ctx);

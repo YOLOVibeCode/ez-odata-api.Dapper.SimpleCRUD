@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using EzOdata.Core;
-using EzOdata.SimpleCrud;
+using Microsoft.Extensions.Logging;
 
-namespace EzOdata.SimpleCrud.AspNetCore;
+namespace EzOdata.Entities.AspNetCore;
 
 /// <summary>The API operation a hook is running for.</summary>
 public enum EzOperation
@@ -20,14 +20,15 @@ public enum EzOperation
     Delete,
 }
 
-/// <summary>What a hook sees: who is calling, which table, and SimpleCRUD bound to the right database.</summary>
+/// <summary>What a hook sees: who is calling, which table, and the write engine bound to the right database.</summary>
 public sealed class EzHookContext
 {
     private readonly EntityBinding _binding;
-    private readonly Func<ISimpleCrudOperations> _client;
+    private readonly Func<IEntityStore> _readStore;
+    private List<Func<Task>>? _onCommitted;
 
     internal EzHookContext(string serviceName, EntityBinding binding, EzOperation operation, ClaimsPrincipal user,
-        IServiceProvider services, SimpleCrudEngine engine, SimpleCrudSession? session, Func<ISimpleCrudOperations> client,
+        IServiceProvider services, IEntityEngine engine, IEntityStore? store, Func<IEntityStore> readStore,
         CancellationToken cancellationToken)
     {
         ServiceName = serviceName;
@@ -36,10 +37,12 @@ public sealed class EzHookContext
         User = user;
         Services = services;
         Engine = engine;
-        Session = session;
-        _client = client;
+        _store = store;
+        _readStore = readStore;
         CancellationToken = cancellationToken;
     }
+
+    private readonly IEntityStore? _store;
 
     /// <summary>The ez-odata service name (the URL segment).</summary>
     public string ServiceName { get; }
@@ -59,17 +62,17 @@ public sealed class EzHookContext
     /// <summary>Request-scoped services when in an HTTP request, else the root provider.</summary>
     public IServiceProvider Services { get; }
 
-    /// <summary>The isolated SimpleCRUD engine for this service's dialect.</summary>
-    public SimpleCrudEngine Engine { get; }
-
-    /// <summary>For writes: the API write's own connection + transaction. Null for reads.</summary>
-    public SimpleCrudSession? Session { get; }
+    /// <summary>The write engine for this service.</summary>
+    public IEntityEngine Engine { get; }
 
     /// <summary>
-    /// SimpleCRUD for this service's database. During writes it enlists in the API write's transaction
-    /// (your extra inserts/updates commit or roll back with it); during reads each call opens a connection.
+    /// The entity store for this service's database. During writes it enlists in the API write's
+    /// transaction; during reads each call opens its own connection.
     /// </summary>
-    public ISimpleCrudOperations Crud => Session ?? _client();
+    public IEntityStore Data => _store ?? _readStore();
+
+    /// <summary>The write store, or null on reads. Engine packages use this for escape hatches.</summary>
+    public IEntityStore? WriteStore => _store;
 
     /// <summary>Cancelled when the request is aborted.</summary>
     public CancellationToken CancellationToken { get; }
@@ -81,16 +84,14 @@ public sealed class EzHookContext
     /// </summary>
     public void OnCommitted(Func<Task> callback)
     {
-        if (Session is null) throw new InvalidOperationException("OnCommitted is only available in write hooks.");
+        if (_store is null) throw new InvalidOperationException("OnCommitted is only available in write hooks.");
         (_onCommitted ??= []).Add(callback);
     }
 
     /// <inheritdoc cref="OnCommitted(Func{Task})"/>
     public void OnCommitted(Action callback) => OnCommitted(() => { callback(); return Task.CompletedTask; });
 
-    private List<Func<Task>>? _onCommitted;
-
-    internal async Task RunCommittedCallbacksAsync(Microsoft.Extensions.Logging.ILogger logger)
+    internal async Task RunCommittedCallbacksAsync(ILogger logger)
     {
         if (_onCommitted is null) return;
         foreach (var callback in _onCommitted)
@@ -101,7 +102,7 @@ public sealed class EzHookContext
             }
             catch (Exception ex)
             {
-                Microsoft.Extensions.Logging.LoggerExtensions.LogError(logger, ex,
+                logger.LogError(ex,
                     "OnCommitted callback failed for {Service}/{Table} ({Operation}); the write was already committed.",
                     ServiceName, Table, Operation);
             }
@@ -114,7 +115,7 @@ public sealed class EzHookContext
     /// <summary>The API column name for an entity property (e.g. <c>nameof(Customer.IsDeleted)</c> → <c>is_deleted</c>).</summary>
     public string Column(string propertyName) =>
         _binding.ColumnForProperty(propertyName)
-        ?? throw new ArgumentException($"'{propertyName}' is not a mapped property of {_binding.Info.EntityType.Name}.", nameof(propertyName));
+        ?? throw new ArgumentException($"'{propertyName}' is not a mapped property of {_binding.Map.EntityType.Name}.", nameof(propertyName));
 
     /// <summary>Fail the request with 400 and this message; the transaction rolls back.</summary>
     public void Reject(string message) => throw new EzHookException(ErrorCodes.ValidationInvalidValue, message);
