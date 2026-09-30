@@ -23,6 +23,7 @@ public sealed class EzExtensionBuilder
     }
 }
 
+/// <summary>Configures one extended ez-odata service.</summary>
 public sealed class EzServiceExtensionBuilder
 {
     private readonly ServiceExtension _extension;

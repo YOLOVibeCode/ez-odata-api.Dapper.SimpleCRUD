@@ -17,6 +17,7 @@ public sealed class SimpleCrudEntityInfo
         Keys = properties.Where(p => p.IsKey).ToList();
     }
 
+    /// <summary>The entity type described.</summary>
     public Type EntityType { get; }
 
     /// <summary>Exactly what SimpleCRUD emits, e.g. <c>[dbo].[Orders]</c>.</summary>
@@ -89,6 +90,7 @@ public sealed class SimpleCrudEntityInfo
     }
 }
 
+/// <summary>How SimpleCRUD maps one entity property.</summary>
 public sealed class SimpleCrudPropertyInfo
 {
     internal SimpleCrudPropertyInfo(PropertyInfo property, string quotedColumn, string column,
@@ -103,9 +105,13 @@ public sealed class SimpleCrudPropertyInfo
         IsSelectable = isSelectable;
     }
 
+    /// <summary>The entity property.</summary>
     public PropertyInfo Property { get; }
+    /// <summary>Exactly what SimpleCRUD emits, e.g. <c>[full_name]</c>.</summary>
     public string QuotedColumnName { get; }
+    /// <summary>Unquoted column name.</summary>
     public string ColumnName { get; }
+    /// <summary>Part of the key (<c>[Key]</c>, or the property named <c>Id</c>).</summary>
     public bool IsKey { get; }
 
     /// <summary>SimpleCRUD writes this column on insert (identity keys, <c>[IgnoreInsert]</c>, <c>[ReadOnly(true)]</c> are excluded).</summary>
@@ -114,7 +120,9 @@ public sealed class SimpleCrudPropertyInfo
     /// <summary>SimpleCRUD writes this column on update (keys, <c>[IgnoreUpdate]</c>, <c>[ReadOnly(true)]</c> are excluded).</summary>
     public bool IsUpdatable { get; }
 
+    /// <summary>SimpleCRUD reads this column (not <c>[IgnoreSelect]</c> / <c>[NotMapped]</c>).</summary>
     public bool IsSelectable { get; }
 
+    /// <inheritdoc />
     public override string ToString() => $"{Property.Name} → {ColumnName}";
 }

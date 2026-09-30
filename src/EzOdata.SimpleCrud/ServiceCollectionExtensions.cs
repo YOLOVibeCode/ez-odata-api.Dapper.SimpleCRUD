@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace EzOdata.SimpleCrud;
 
+/// <summary>Dependency-injection registration for <see cref="ISimpleCrud"/> clients.</summary>
 public static class SimpleCrudServiceCollectionExtensions
 {
     /// <summary>Registers an <see cref="ISimpleCrud"/> singleton for one database.</summary>

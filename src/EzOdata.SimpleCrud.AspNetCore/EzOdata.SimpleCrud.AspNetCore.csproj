@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Description>Extend and override ez-odata-api's instant API with Dapper.SimpleCRUD entities and typed hooks — without modifying ez-odata-api.</Description>
   </PropertyGroup>
 

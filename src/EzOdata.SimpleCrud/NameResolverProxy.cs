@@ -64,6 +64,7 @@ public abstract class ForwardingResolver
 {
     internal Func<object, string>? Resolver { get; set; }
 
+    /// <summary>Forwards to the configured naming function.</summary>
     public string Resolve(object argument) => Resolver!(argument);
 }
 #endif

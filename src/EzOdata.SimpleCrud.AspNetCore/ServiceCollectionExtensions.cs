@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace EzOdata.SimpleCrud.AspNetCore;
 
+/// <summary>Registration entry point: <c>services.ExtendEzOData(...)</c>.</summary>
 public static class EzODataSimpleCrudServiceCollectionExtensions
 {
     /// <summary>
