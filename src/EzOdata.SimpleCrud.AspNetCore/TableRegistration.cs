@@ -58,8 +58,8 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
                         Apply(entity, record.Values, WriteKind.Insert);
                         await handler.BeforeInsertAsync(entity, ctx);
 
-                        var key = await handler.InsertAsync(entity, ctx);
-                        var keyValue = AdoptKey(entity, key);
+                        var inserted = await handler.InsertAsync(entity, ctx);
+                        var keyValue = AdoptKey(entity, inserted);
 
                         var row = await kit.ReadByKeyAsync(execution, binding, keyValue)
                             ?? throw new ConnectorException(ErrorCodes.InternalUnmapped, "The inserted row could not be read back.");
@@ -117,21 +117,34 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
         }
 
         /// <summary>Row filters (write precondition) and BeforeRead filters both gate writes: a row you cannot see, you cannot change.</summary>
-        private async Task<bool> VisibleAsync(WriteExecution execution, WriteToolkit kit, object? key, FilterNode? precondition, FilterNode? readFilter)
+        private async Task<bool> VisibleAsync(WriteExecution execution, WriteToolkit kit, IReadOnlyDictionary<string, object?> key, FilterNode? precondition, FilterNode? readFilter)
         {
             var predicate = precondition is null ? readFilter : readFilter is null ? precondition : EzFilter.And(precondition, readFilter);
             return predicate is null || await kit.ExistsAsync(execution, binding, key, predicate);
         }
 
-        private (object? FilterValue, object EntityKey) Key(WriteRequest write)
+        /// <summary>
+        /// The URL key as (column → value) for SQL, plus what SimpleCRUD's <c>Get</c> expects: the value for a
+        /// single key, or an instance carrying the key properties for a composite key.
+        /// </summary>
+        private (IReadOnlyDictionary<string, object?> FilterValues, object EntityKey) Key(WriteRequest write)
         {
             var keys = write.Key?.Values ?? throw new QueryValidationException(ErrorCodes.ValidationInvalidValue, "A key is required.");
-            if (!keys.TryGetValue(binding.KeyColumn, out var value) || value is null)
+            var filter = new Dictionary<string, object?>(StringComparer.Ordinal);
+            var probe = new T();
+            for (var i = 0; i < binding.KeyColumns.Count; i++)
             {
-                throw new QueryValidationException(ErrorCodes.ValidationInvalidValue, $"Key '{binding.KeyColumn}' is required.");
+                var column = binding.KeyColumns[i];
+                if (!keys.TryGetValue(column, out var value) || value is null)
+                {
+                    throw new QueryValidationException(ErrorCodes.ValidationInvalidValue, $"Key '{column}' is required.");
+                }
+
+                filter[column] = value;
+                binding.Keys[i].Property.SetValue(probe, ValueConverter.To(value, binding.Keys[i].Property.PropertyType, column));
             }
 
-            return (value, ValueConverter.To(value, binding.Key.Property.PropertyType, binding.KeyColumn)!);
+            return (filter, binding.IsComposite ? probe : binding.Keys[0].Property.GetValue(probe)!);
         }
 
         private void Apply(T entity, IReadOnlyDictionary<string, object?> values, WriteKind kind)
@@ -158,17 +171,24 @@ internal sealed class TableRegistration<T> : TableRegistration where T : class, 
             }
         }
 
-        private object AdoptKey(T entity, object? insertedKey)
+        /// <summary>Applies a generated single key to the entity; returns the row's key values (column → value).</summary>
+        private IReadOnlyDictionary<string, object?> AdoptKey(T entity, object? insertedKey)
         {
-            var property = binding.Key.Property;
-            if (insertedKey is not null)
+            if (!binding.IsComposite && insertedKey is not null)
             {
-                var converted = ValueConverter.To(insertedKey, property.PropertyType, binding.KeyColumn);
+                var property = binding.Keys[0].Property;
+                var converted = ValueConverter.To(insertedKey, property.PropertyType, binding.KeyColumns[0]);
                 if (!Equals(property.GetValue(entity), converted)) property.SetValue(entity, converted);
             }
 
-            return property.GetValue(entity)
-                ?? throw new ConnectorException(ErrorCodes.InternalUnmapped, "Insert did not produce a key.");
+            var key = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (var i = 0; i < binding.KeyColumns.Count; i++)
+            {
+                key[binding.KeyColumns[i]] = binding.Keys[i].Property.GetValue(entity)
+                    ?? throw new ConnectorException(ErrorCodes.InternalUnmapped, "Insert did not produce a key.");
+            }
+
+            return key;
         }
 
         private static T Clone(T source)

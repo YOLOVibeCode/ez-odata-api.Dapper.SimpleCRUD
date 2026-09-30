@@ -46,6 +46,16 @@ public sealed class EzServiceExtensionBuilder
     }
 
     /// <summary>
+    /// Expose entity property names (<c>Name</c>) instead of column names (<c>full_name</c>) for the tables
+    /// this service maps with entities. Row filters and field rules then use property names too.
+    /// </summary>
+    public EzServiceExtensionBuilder UsePropertyNames(bool value = true)
+    {
+        _extension.UsePropertyNames = value;
+        return this;
+    }
+
+    /// <summary>
     /// Take over a table with a SimpleCRUD entity (mapped by SimpleCRUD's own attributes) and optional inline hooks.
     /// Writes go through SimpleCRUD; columns the entity doesn't write become read-only in the API.
     /// </summary>

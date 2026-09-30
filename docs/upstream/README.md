@@ -6,71 +6,68 @@ Nothing here has been posted. Each item is small, and each was verified against 
 
 ---
 
-## PR 1: `SetDialect` and `Set*NameResolver` rebuild cached names
+## PR 1: rebuild cached names when the dialect or a resolver actually changes
 
 **Patch:** [`0001-SetDialect-clears-cached-names.patch`](0001-SetDialect-clears-cached-names.patch)
-(13 lines added, one file, CRLF preserved)
+(16 lines in `SimpleCRUD.cs` plus one test in `Tests.cs`, CRLF preserved, no public API change).
+Apply it with `git apply`.
 
-### Proposed PR text
+### The bug
 
-> **Title:** Rebuild cached table/column names when the dialect or a name resolver changes
->
-> Hi Eric, thanks for SimpleCRUD. I found a small caching issue while building on top of it.
->
-> `TableNames`, `ColumnNames` and `StringBuilderCacheDict` store names *already quoted* for the
-> dialect that was active at first use, and nothing clears them. After the first query:
->
-> 1. **Switching dialects produces mixed SQL.** On 2.3.0:
->    ```csharp
->    SimpleCRUD.SetDialect(SimpleCRUD.Dialect.SQLServer);
->    conn.GetList<Widget>(new { Name = "a" });
->    SimpleCRUD.SetDialect(SimpleCRUD.Dialect.PostgreSQL);
->    conn.GetListPaged<Widget>(1, 10, "", "Name");
->    // Select [Id],[Name] from [Widget]  Order By Name LIMIT 10 OFFSET ((1-1) * 10)
->    //        ^ SQL Server quoting            ^ PostgreSQL paging, which PostgreSQL rejects
->    ```
-> 2. **Setting a resolver after first use has no effect.** `SetTableNameResolver` and
->    `SetColumnNameResolver` are never consulted for types that are already cached.
->
-> The fix clears the three caches in `SetDialect`, `SetTableNameResolver` and
-> `SetColumnNameResolver`. It's 13 lines and changes no public API. The static constructor's
-> `SetDialect` call is safe, because field initializers run first.
->
-> It doesn't show up in the existing suite because `Program.Main` runs SQL Server and then SQLite
-> in one process, and SQLite happens to accept `[bracket]` quoting.
->
-> A test in the style of `Tests.cs` (it fails on 2.3.0 and passes with the patch):
->
-> ```csharp
-> public void TestChangeDialectRebuildsCachedNames()
-> {
->     var resolver = new CountingTableNameResolver();
->     SimpleCRUD.SetTableNameResolver(resolver);
->     using (var connection = GetOpenConnection())
->     {
->         connection.RecordCount<User>();
->         connection.RecordCount<User>();
->         resolver.Calls.IsEqualTo(1);          // second call served from the cache
->         SimpleCRUD.SetDialect(_dbtype);
->         connection.RecordCount<User>();
->         resolver.Calls.IsEqualTo(2);          // rebuilt after SetDialect
->     }
->     SimpleCRUD.SetTableNameResolver(new SimpleCRUD.TableNameResolver());
-> }
->
-> private class CountingTableNameResolver : SimpleCRUD.TableNameResolver
-> {
->     public int Calls;
->     public override string ResolveTableName(Type type) { Calls++; return base.ResolveTableName(type); }
-> }
-> ```
+`TableNames`, `ColumnNames` and `StringBuilderCacheDict` store names *already quoted* for the dialect
+active at first use, and nothing clears them. After the first query:
 
-**Verified:** the repro emits `"Id","Name" from "Widget" … LIMIT` with the patch. The counting test
-fails on 2.3.0 (0 resolver calls) and passes with the patch (1, then 2). SimpleCRUD's own
-`Program.Main` harness was not run: it uses Windows paths and `Console.ReadKey`.
+1. **Switching dialects produces mixed SQL.** SQL Server `[brackets]` end up inside PostgreSQL's
+   `LIMIT` paging, and PostgreSQL rejects them.
+2. **Setting a resolver after first use has no effect.** Cached names win.
 
-This PR makes sequential switching correct. It does **not** make concurrent use of two dialects
-safe, because the dialect is still one static value. That is item 2.
+### The fix
+
+Clear the three caches when `SetDialect` changes the dialect, or when a resolver is replaced.
+Clearing happens **only on a real change**: on #56 the recommended pattern is to call `SetDialect`
+whenever a connection opens, and that pattern keeps its caching.
+
+### How we reproduced and verified it
+
+| Check | 2.3.0 (NuGet) | `master` 62a5431 | `master` + patch |
+|---|---|---|---|
+| [Real servers](proof/real-servers/Program.cs): SQL Server, then `SetDialect(PostgreSQL)`, then `Get`/`Insert` on PostgreSQL | ❌ `42601: syntax error at or near "["` | ❌ same | ✅ |
+| New test `TestChangeDialectRebuildsCachedNames` | ❌ `0 should be equal to 1` | ❌ | ✅ |
+| His full SQLite suite ([runner](proof/suite-runner/Program.cs); x64 under Rosetta, because `System.Data.SQLite` has no osx-arm64 build) | n/a | 78/78 | 79/79 (the new test included) |
+| `Dapper.SimpleCRUDTests` builds (net8.0) | n/a | ✅ | ✅ (same pre-existing CA1416 warning) |
+
+His `Program.Main` runs SQL Server and then SQLite in one process, and SQLite accepts `[brackets]`.
+That's likely why the suite never caught this.
+
+### The test (added after `TestChangeDialect`)
+
+```csharp
+public void TestChangeDialectRebuildsCachedNames()
+{
+    var resolver = new CountingTableNameResolver();
+    SimpleCRUD.SetTableNameResolver(resolver);
+    using (var connection = GetOpenConnection())
+    {
+        connection.RecordCount<User>();
+        connection.RecordCount<User>();
+        resolver.Calls.IsEqualTo(1); //second call is served from the cache
+
+        SimpleCRUD.SetDialect(_dbtype); //same dialect: cache is kept
+        connection.RecordCount<User>();
+        resolver.Calls.IsEqualTo(1);
+
+        var other = _dbtype == SimpleCRUD.Dialect.SQLServer ? SimpleCRUD.Dialect.PostgreSQL : SimpleCRUD.Dialect.SQLServer;
+        SimpleCRUD.SetDialect(other); //a real switch rebuilds names with the new quoting
+        SimpleCRUD.SetDialect(_dbtype);
+        connection.RecordCount<User>();
+        resolver.Calls.IsEqualTo(2);
+    }
+    SimpleCRUD.SetTableNameResolver(new SimpleCRUD.TableNameResolver());
+}
+```
+
+This makes sequential switching correct. It does **not** make concurrent use of two dialects safe,
+because the dialect is still one static value. That is item 2.
 
 ---
 
