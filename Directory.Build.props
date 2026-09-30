@@ -28,7 +28,7 @@
     -->
     <EzOdataSource Condition="'$(EzOdataSource)' == ''">package</EzOdataSource>
     <EzOdataRoot Condition="'$(EzOdataRoot)' == ''">$(MSBuildThisFileDirectory)..\ez-odata-api\</EzOdataRoot>
-    <EzOdataVersion Condition="'$(EzOdataVersion)' == ''">1.0.5</EzOdataVersion>
+    <EzOdataVersion Condition="'$(EzOdataVersion)' == ''">1.0.6</EzOdataVersion>
 
     <!-- Minimum Dapper.SimpleCRUD the packages depend on; CI also tests newer releases (-p:SimpleCrudVersion=...). -->
     <SimpleCrudVersion Condition="'$(SimpleCrudVersion)' == ''">2.3.0</SimpleCrudVersion>

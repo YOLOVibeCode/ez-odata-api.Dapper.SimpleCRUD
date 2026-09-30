@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-30
+
+### Added
+- Documentation: **Browse and query your database in Swagger UI**. It covers pointing
+  `Swashbuckle.AspNetCore.SwaggerUI` at the OpenAPI 3.1 documents ez-odata generates per service,
+  running OData queries with **Try it out**, and authentication options. The sample app serves `/swagger`.
+
+### Changed
+- Depends on ez-odata-api **1.0.6**. That fixes the REST OpenAPI document's server URL, which sent
+  Swagger UI's **Try it out** to `/_table/...` instead of `/api/rest/{service}/_table/...` (404).
+
 ## [1.0.0] - 2026-09-30
 
 ### Added
@@ -34,6 +45,7 @@ All notable changes to this project are documented here. The format follows
   delete, composite keys, `UsePropertyNames()`, and startup validation of entities against the schema.
 - Depends on the ez-odata-api 1.0.5 packages from nuget.org.
 
-[Unreleased]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/compare/v1.0.0-rc.1...v1.0.0
 [1.0.0-rc.1]: https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD/releases/tag/v1.0.0-rc.1
