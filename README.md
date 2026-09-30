@@ -79,6 +79,74 @@ public sealed class CustomerHandler(IClock clock) : EzTableHandler<Customer>
 
 A runnable version is in [`samples/EzOdata.SimpleCrud.Sample`](samples/EzOdata.SimpleCrud.Sample/Program.cs).
 
+## Browse and query your database in Swagger UI
+
+ez-odata generates an **OpenAPI 3.1 document for every service** from the live database schema, with your
+entity overrides applied. Point Swagger UI at it and you get a page where you can browse every table and
+run queries against the database.
+
+| API | OpenAPI document |
+|---|---|
+| OData v4 (`MapEzOData("/api/odata")`) | `/api/odata/{service}/openapi.json` |
+| REST (`MapEzODataRest("/api/rest")`, optional) | `/api/rest/{service}/openapi.json` |
+
+**1. Add Swagger UI:**
+
+```bash
+dotnet add package Swashbuckle.AspNetCore.SwaggerUI
+```
+
+**2. Point it at your services**, after mapping the endpoints:
+
+```csharp
+app.MapEzOData("/api/odata");
+app.MapEzODataRest("/api/rest");     // optional REST dialect
+
+app.UseSwaggerUI(ui =>
+{
+    ui.RoutePrefix = "swagger";
+    ui.SwaggerEndpoint("/api/odata/crm/openapi.json", "crm (OData v4)");
+    ui.SwaggerEndpoint("/api/rest/crm/openapi.json", "crm (REST)");
+    // one pair of lines per service you declared with ez.AddService(...)
+});
+```
+
+**3. Open `https://localhost:<port>/swagger`**, then:
+- Pick a document (top right).
+- Expand a table, for example `GET /customers`, and click **Try it out**.
+- Fill in the query options:
+
+  | Option | Example |
+  |---|---|
+  | `$filter` | `country eq 'US' and startswith(full_name,'A')` |
+  | `$select` | `id,full_name` |
+  | `$orderby` | `full_name desc` |
+  | `$top` / `$skip` | paging |
+  | `$count` | `true` |
+  | `$expand` | `orders` |
+
+- Click **Execute**. You see the real request URL, the SQL-backed JSON response, and a `curl` command you can reuse.
+
+`POST`, `PATCH` and `DELETE` work from the same page. On tables you've taken over with an entity, those writes
+go through SimpleCRUD and your hooks, so validation errors appear as the `400` responses your hooks return.
+
+**Authentication.** The documents are served with the same authorization as the data, so Swagger UI only
+sees what the caller's role allows.
+- **Local development:** add `ez.AllowAnonymousInDevelopment()`. It's refused outside `Development`.
+- **Cookie authentication** works as-is.
+- **Bearer tokens:** the browser's request for the document needs the token too. Add a request interceptor
+  that reads it from somewhere you control:
+
+  ```csharp
+  ui.UseRequestInterceptor("(req) => { const t = sessionStorage.getItem('apiToken'); if (t) req.headers['Authorization'] = 'Bearer ' + t; return req; }");
+  ```
+
+  Then run `sessionStorage.setItem('apiToken', '<token>')` in the browser console and reload.
+
+Consider keeping `/swagger` to non-production environments, or behind your own authorization policy.
+The sample app ([`samples/EzOdata.SimpleCrud.Sample`](samples/EzOdata.SimpleCrud.Sample/Program.cs)) has this set up.
+Run it and open http://localhost:5199/swagger.
+
 ## Extension levels
 
 Every level is opt-in. With none of them configured, you have exactly stock ez-odata.
@@ -190,7 +258,7 @@ key, and PostgreSQL case-sensitivity. Any mismatch stops the app with a precise 
 
 ## Using ez-odata-api
 
-The packages depend on the published `EzOdata.*` packages on nuget.org (1.0.5), so a clone builds on
+The packages depend on the published `EzOdata.*` packages on nuget.org (1.0.6), so a clone builds on
 its own. To develop against a local ez-odata-api checkout instead:
 
 ```bash

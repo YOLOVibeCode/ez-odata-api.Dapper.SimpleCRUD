@@ -7,6 +7,7 @@
 //        -d '{"full_name":"Grace","country":"us"}'                  # SimpleCRUD + hooks
 //   curl -X DELETE 'http://localhost:5199/api/odata/shop/customers(1)' # soft delete
 //   curl http://localhost:5199/report                                 # ISimpleCrud in your own code
+//   open http://localhost:5199/swagger                                # browse and query the database in Swagger UI
 
 using Dapper;
 using EzOdata.AspNetCore;
@@ -37,7 +38,17 @@ builder.Services.ExtendEzOData(x => x.Service("shop", shop => shop.Table<Custome
 builder.Services.AddSimpleCrud("shop", SimpleCRUD.Dialect.SQLite, _ => new SqliteConnection($"Data Source={dbPath}"));
 
 var app = builder.Build();
-app.MapEzOData("/api/odata");
+app.MapEzOData("/api/odata");       // OData v4, with its OpenAPI document at /api/odata/{service}/openapi.json
+app.MapEzODataRest("/api/rest");    // optional REST dialect, at /api/rest/{service}/openapi.json
+
+// 4. Swagger UI over the OpenAPI documents ez-odata generates from the live schema.
+app.UseSwaggerUI(ui =>
+{
+    ui.RoutePrefix = "swagger";
+    ui.DocumentTitle = "shop API";
+    ui.SwaggerEndpoint("/api/odata/shop/openapi.json", "shop (OData v4)");
+    ui.SwaggerEndpoint("/api/rest/shop/openapi.json", "shop (REST)");
+});
 app.MapGet("/report", async ([FromKeyedServices("shop")] ISimpleCrud crud) => new
 {
     active = await crud.RecordCountAsync<Customer>(new { IsDeleted = false }),

@@ -42,4 +42,8 @@ app.MapEzOData("/api/odata");
 - Composite keys are supported, and `UsePropertyNames()` exposes C# property names in the API.
 - `ctx.OnCommitted(...)` runs side effects only after a successful commit.
 
+**Swagger UI:** every service gets an OpenAPI 3.1 document at `/api/odata/{service}/openapi.json`.
+Point `Swashbuckle.AspNetCore.SwaggerUI` at it to browse and query the database from the browser. See
+[Browse and query your database in Swagger UI](https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD#browse-and-query-your-database-in-swagger-ui).
+
 **Docs, tests and samples:** https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD · Apache-2.0
