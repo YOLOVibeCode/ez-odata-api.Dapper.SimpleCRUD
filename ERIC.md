@@ -46,6 +46,32 @@ solved it **outside** SimpleCRUD, without changing a line of it:
   table be taken over by an ordinary SimpleCRUD POCO with typed hooks (validation, auditing, soft
   delete). Every write goes through SimpleCRUD's `Insert` / `Update` / `Delete`.
 
+## A little about me
+
+I've been writing software since 1992. I started in COBOL on IBM mainframes, moved through Delphi and
+VB6, and have worked mostly in C# since .NET 1.0. Most of that time has gone into the same kind of
+work: getting data out of SQL databases and into applications, usually with some code generation
+involved. Along the way I've used most of the .NET data-access options, including ADO.NET, Entity
+Framework, SimpleData and Dapper, and published a few small tools of my own, like
+[ez-db-codegen-core](https://github.com/rvegajr/ez-db-codegen-core). Since 2011 I've done this as a
+consultant through my company, Noctusoft.
+
+I mention it only so you know where I'm coming from. After enough years of heavy data layers, a
+library that stays small and does the common work well is something I appreciate.
+
+## Why I did this
+
+Instead of the usual interview prep, I wanted to spend the time in your code. It seemed like an honest
+way to show how I work, and a better thank-you than words alone.
+
+## If it's helpful today
+
+I'm happy to walk through the sample app, the load-context approach, or the PR, whichever is useful,
+or none of it. I'd also enjoy hearing what problem you were solving when you first wrote SimpleCRUD,
+and what it's been like to maintain it for so long.
+
+Thank you for making the time to meet.
+
 I hope it's useful, both the fix and the proof that people are still building new things on your
 work. If you'd like anything changed in the PR, tell me and I'll adjust it. If you'd rather not take
 it, no hard feelings at all.
