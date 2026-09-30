@@ -73,6 +73,11 @@ internal sealed class BenchWorld : IAsyncDisposable
         {
             foreach (var db in dbs)
             {
+                if (engine == "efcore" && db.Kind == "mysql")
+                {
+                    Console.WriteLine("Skipping efcore/mysql: no MySqlConnector-compatible EF Core 10 provider.");
+                    continue;
+                }
                 Console.WriteLine($"Starting {engine}/{db.Kind}…");
                 world.Sessions.Add(await BenchSession.StartAsync(engine, await IsolateAsync(db, engine)));
             }

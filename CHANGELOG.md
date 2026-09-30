@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows
 - `./demo-swagger.sh` / `demo-swagger.cmd`: look up Swagger, read two sample databases, time both.
 - Depends on ez-odata-api **1.0.6** (REST OpenAPI `servers[0].url` includes the prefix and service, so
   Swagger UI "Try it out" hits the real paths).
+- EF Core MySQL is not supported on ez-odata's MySqlConnector connection (Pomelo 9 crashes on EF Core 10;
+  Oracle's provider requires `MySql.Data`). Use SimpleCRUD for MySQL, or pass a custom `UseEfCore` configure.
 
 ### Changed
 - Handler defaults call `ctx.Data` instead of SimpleCRUD. `UpdateAsync` receives the original row so PATCH

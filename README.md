@@ -277,8 +277,9 @@ are x86-only and crash under QEMU on Apple silicon, so on ARM hosts the tests us
 
 - Deep insert (nested POST) is not supported on entity-mapped tables, and a `$batch` changeset
   cannot mix entity-mapped and plain tables.
-- The MySQL EF provider is Pomelo 9 on EF Core 10 (NU1608). Swap to a 10.x Pomelo (or Oracle's
-  provider) when one ships.
+- EF Core MySQL is not supported on ez-odata's MySqlConnector connection. Pomelo 9 is not ABI-compatible
+  with EF Core 10, and Oracle's provider requires `MySql.Data`. Use `.UseSimpleCrud()` for MySQL, or pass
+  a custom `UseEfCore` configure.
 - Key types are limited to SimpleCRUD's own: int, long, short, Guid and string, including composite keys.
 - The facade reads a few of SimpleCRUD's private metadata methods. CI tests 2.3.0 and 2.4.0-beta1,
   and an incompatible version fails at startup with a clear message. Isolated engines need
