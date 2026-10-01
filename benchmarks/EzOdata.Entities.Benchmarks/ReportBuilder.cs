@@ -183,7 +183,7 @@ public static class ReportBuilder
             {
                 var within = facade.Count(x => Math.Abs(x.f!.MeanNs - x.s!.MeanNs) <= x.f.ErrorNs + x.s.ErrorNs);
                 notes.Add("**The EzOdata facade** (SimpleCRUD in an isolated copy per dialect) against SimpleCRUD's static API on SQLite: " +
-                          string.Join(", ", facade.Select(x => $"{x.op.ToLowerInvariant()} {(x.f!.MeanNs - x.s!.MeanNs) / x.s.MeanNs * 100:+0;-0}%")) +
+                          string.Join(", ", facade.Select(x => $"{x.op.ToLowerInvariant()} {(x.f!.MeanNs - x.s!.MeanNs) / x.s.MeanNs * 100:+0;-0;0}%")) +
                           $"; {within} of {facade.Count} are inside the confidence intervals.");
             }
 
