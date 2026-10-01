@@ -301,17 +301,25 @@ public sealed class EngineTests(ITestOutputHelper output) : IAsyncLifetime
 
         for (var i = 0; i < 500; i++) { connection.Get<Customer>(1); engine.Get<Customer>(connection, 1); }
 
-        const int n = 5000;
-        var direct = Stopwatch.StartNew();
-        for (var i = 0; i < n; i++) connection.Get<Customer>(1);
-        direct.Stop();
+        // Shared CI runners stall without warning. Interleaved rounds compared best-to-best keep one stall
+        // from landing on only one side of the ratio.
+        const int rounds = 10, n = 500;
+        var direct = TimeSpan.MaxValue;
+        var facade = TimeSpan.MaxValue;
+        var clock = new Stopwatch();
+        for (var r = 0; r < rounds; r++)
+        {
+            clock.Restart();
+            for (var i = 0; i < n; i++) connection.Get<Customer>(1);
+            if (clock.Elapsed < direct) direct = clock.Elapsed;
 
-        var facade = Stopwatch.StartNew();
-        for (var i = 0; i < n; i++) engine.Get<Customer>(connection, 1);
-        facade.Stop();
+            clock.Restart();
+            for (var i = 0; i < n; i++) engine.Get<Customer>(connection, 1);
+            if (clock.Elapsed < facade) facade = clock.Elapsed;
+        }
 
-        var ratio = facade.Elapsed.TotalMilliseconds / direct.Elapsed.TotalMilliseconds;
-        output.WriteLine($"{n} Get<T>: direct SimpleCRUD {direct.ElapsedMilliseconds} ms, isolated engine {facade.ElapsedMilliseconds} ms (x{ratio:F2})");
+        var ratio = facade.TotalMilliseconds / direct.TotalMilliseconds;
+        output.WriteLine($"{rounds} x {n} Get<T>, best round: direct SimpleCRUD {direct.TotalMilliseconds:F1} ms, isolated engine {facade.TotalMilliseconds:F1} ms (x{ratio:F2})");
         Assert.True(ratio < 1.5, $"facade overhead too high: x{ratio:F2}");
     }
 }
