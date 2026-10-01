@@ -59,16 +59,17 @@ public class EngineBenchmarks
     }
 
     /// <summary>ShortRun, in process (the sessions and containers live in this process), EF Core × MySQL filtered out.</summary>
-    public static IConfig Config(string dir, bool thorough = false)
+    /// <param name="iterations">Measured iterations; 0 means ShortRun (3, for a quick look).</param>
+    public static IConfig Config(string dir, int iterations = 0)
     {
         Directory.CreateDirectory(dir);
-        // Thorough: 20 measured iterations of ~250 ms each (writes against a real database are noisy; ShortRun's
-        // 3 iterations are not enough to separate libraries).
-        var job = thorough
-            ? Job.Default.WithWarmupCount(5).WithIterationCount(20).WithIterationTime(Perfolizer.Horology.TimeInterval.FromMilliseconds(250))
+        // Iterations of about 250 ms each. The confidence interval narrows with the square root of the count:
+        // SQLite is tight at 20; a networked database's round trip needs more (50) to separate libraries.
+        var job = iterations > 0
+            ? Job.Default.WithWarmupCount(5).WithIterationCount(iterations).WithIterationTime(Perfolizer.Horology.TimeInterval.FromMilliseconds(250))
             : Job.ShortRun;
         return ManualConfig.CreateEmpty()
-            .AddJob(job.WithToolchain(InProcessEmitToolchain.Instance).WithId(thorough ? "inproc-20" : "inproc"))
+            .AddJob(job.WithToolchain(InProcessEmitToolchain.Instance).WithId(iterations > 0 ? $"inproc-{iterations}" : "inproc"))
             .AddDiagnoser(MemoryDiagnoser.Default)
             .AddColumnProvider(DefaultColumnProviders.Instance)
             .AddLogger(BenchmarkDotNet.Loggers.ConsoleLogger.Default)

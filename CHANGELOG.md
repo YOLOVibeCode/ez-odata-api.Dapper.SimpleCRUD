@@ -26,6 +26,14 @@ All notable changes to this project are documented here. The format follows
   <https://yolovibecode.github.io/ez-odata-api.Dapper.SimpleCRUD/benchmarks/report.html>.
   `docs/benchmarks` explains how to run the benchmark, what it needs, how long it takes, and its settings.
 
+- **Drop-in analysis** (`benchmarks/DropIn`, `docs/benchmarks/drop-in.md`): fresh `dotnet new web` projects that add
+  only the published package, against an existing database. It measures lines written, packages and bytes
+  downloaded, publish size, cold start (21 interleaved rounds), memory, load contexts, and HTTP latency and
+  throughput over real sockets, with the spread between rounds.
+- Benchmark resolution: 50 measured iterations on PostgreSQL, MySQL and SQL Server (20 on SQLite, where the
+  intervals are already tight); `--bdn-iterations N` overrides. `docs/benchmarks` analyses what more samples do
+  and don't fix.
+
 ### Fixed
 - Benchmark report: a difference that rounds to zero printed as "-+0%"; it now prints "0%".
 - Benchmarks: a service whose startup schema read failed answered every request with 404, and three of the

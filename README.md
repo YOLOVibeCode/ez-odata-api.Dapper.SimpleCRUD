@@ -82,6 +82,8 @@ and SQL Server (each in Docker, one at a time; SQLite only without Docker):
 - Running SimpleCRUD through this facade costs nothing measurable (−6% to +2%, inside the confidence intervals).
 - Through the API, reads cost the same on every engine; writes add 0.3–0.6 ms with SimpleCRUD and 0.4–1.4 ms
   with EF Core.
+- Dropped into a new project, the SimpleCRUD engine adds 0.5 MB and about 30 ms of cold start to stock ez-odata;
+  the EF Core engine adds 19 MB and about 160 ms ([drop-in analysis](docs/benchmarks/drop-in.md)).
 - The benchmark led to an upstream fix: caching SimpleCRUD's per-type property lists cuts `Get` by 24% and
   its allocations by 62% ([ericdc1/Dapper.SimpleCRUD#283](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/283)).
 

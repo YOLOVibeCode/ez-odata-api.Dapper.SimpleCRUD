@@ -1,0 +1,17 @@
+{
+  "package": "EzOdata.SimpleCrud.AspNetCore 2.0.1",
+  "linesWritten": 26,
+  "files": [
+    "Customer.cs",
+    "Program.cs"
+  ],
+  "addPackageSeconds": 4.33,
+  "publishSeconds": 1.224,
+  "downloadedMb": 54.4,
+  "topLevelPackages": [
+    "EzOdata.SimpleCrud.AspNetCore 2.0.1"
+  ],
+  "transitivePackages": 47,
+  "publishMb": 44.6,
+  "publishDlls": 67
+}

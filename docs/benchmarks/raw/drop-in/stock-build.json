@@ -1,0 +1,16 @@
+{
+  "package": "EzOdata.AspNetCore 1.0.7",
+  "linesWritten": 12,
+  "files": [
+    "Program.cs"
+  ],
+  "addPackageSeconds": 6.256,
+  "publishSeconds": 2.795,
+  "downloadedMb": 53.9,
+  "topLevelPackages": [
+    "EzOdata.AspNetCore 1.0.7"
+  ],
+  "transitivePackages": 42,
+  "publishMb": 44.2,
+  "publishDlls": 62
+}

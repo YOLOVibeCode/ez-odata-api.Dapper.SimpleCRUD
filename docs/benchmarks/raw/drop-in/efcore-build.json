@@ -1,0 +1,17 @@
+{
+  "package": "EzOdata.EntityFrameworkCore.AspNetCore 2.0.1",
+  "linesWritten": 30,
+  "files": [
+    "Customer.cs",
+    "Program.cs"
+  ],
+  "addPackageSeconds": 3.767,
+  "publishSeconds": 0.96,
+  "downloadedMb": 73.0,
+  "topLevelPackages": [
+    "EzOdata.EntityFrameworkCore.AspNetCore 2.0.1"
+  ],
+  "transitivePackages": 54,
+  "publishMb": 57.4,
+  "publishDlls": 72
+}
