@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **`./try.sh` / `try.cmd`**: one command from a fresh clone to a live API. Downloads the .NET 10 SDK into
+  `./.dotnet` when none is installed, starts the showcase (stock ez-odata, the SimpleCRUD engine and the
+  EF Core engine over a seeded shop database), opens Swagger UI and runs a narrated tour of 44 checks:
+  discovery, OData queries, writes with hooks and rollbacks on both engines, row filters and field
+  policies. CI runs it on Linux, macOS and Windows before publishing.
+- **`samples/EzOdata.Showcase`**: the showcase itself (handlers with validation, audit in the same
+  transaction, soft delete, `Reject()`, `OnCommitted`; composite keys; demo header auth with three roles).
+- **Data-access benchmark**: hand-written Dapper, Dapper.SimpleCRUD (facade and static API) and EF Core
+  (tracked and `AsNoTracking`) on SQLite, PostgreSQL, MySQL and SQL Server, with BenchmarkDotNet, after
+  a check that every library returns the same rows. `./compare.sh --data-access`, `./try.sh --benchmark`.
+- A new report: findings computed from the results, per-operation charts with confidence intervals,
+  allocations, the HTTP engine comparison, tests and method. Results in `docs/benchmarks`.
+- `benchmarks/SimpleCrud.CachingAB`: Dapper.SimpleCRUD `master` against the per-type caching change
+  submitted upstream ([ericdc1/Dapper.SimpleCRUD#283](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/283)),
+  compiled side by side from GitHub sources.
+
+### Fixed
+- Benchmarks: a service whose startup schema read failed answered every request with 404, and three of the
+  four HTTP benchmarks timed those 404s without noticing. Sessions now probe the service before use and
+  retry once, and every benchmark request checks its status.
+- Benchmarks: the quick harness ran engines one after another (later ones ran warmer) and measured
+  allocations on one thread across `await`. Engines are now interleaved request by request and
+  allocations are whole-process.
+- `compare.sh`: runs test projects one after another and each database in its own process, so the
+  containers no longer compete for a small Docker VM.
+- Benchmarks on MySQL: create the per-engine databases as root (the application user cannot), and declare
+  the `orders → customers` foreign key that the other dialects already had (without it `$expand` is a 400).
+
 ## [2.0.1] - 2026-09-30
 
 ### Added

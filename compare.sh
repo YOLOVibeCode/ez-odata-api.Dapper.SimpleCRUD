@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
-# One-click: build, test both engines, time them, write a side-by-side report.
+# One-click: build, test, benchmark, and write a side-by-side report (report.html + report.md).
+#
+#   ./compare.sh                     tests + HTTP timings for stock ez-odata, SimpleCRUD and EF Core engines
+#   ./compare.sh --data-access       also the libraries on their own: Dapper vs Dapper.SimpleCRUD vs EF Core
+#                                    (BenchmarkDotNet, 20 measured iterations per case)
+#   ./compare.sh --quick             shorter runs (ShortRun, 50 HTTP iterations) for a fast look
+#   ./compare.sh --sqlite-only       no Docker
+#   ./compare.sh --deep              HTTP through BenchmarkDotNet instead of the interleaved harness
+#
+# Each database is benchmarked in its own process, alone in the Docker VM: SQLite, then PostgreSQL, MySQL and
+# SQL Server (Azure SQL Edge on ARM). Test projects run one after another (they share Docker).
 set -u
 set -o pipefail
 
@@ -11,6 +21,8 @@ SQLITE_ONLY=0
 ITERATIONS=200
 NO_TESTS=0
 NO_OPEN=0
+DATA_ACCESS=0
+QUICK=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --deep) DEEP=1; shift ;;
@@ -18,60 +30,63 @@ while [[ $# -gt 0 ]]; do
     --iterations) ITERATIONS="${2:-200}"; shift 2 ;;
     --no-tests) NO_TESTS=1; shift ;;
     --no-open) NO_OPEN=1; shift ;;
-    -h|--help)
-      echo "Usage: ./compare.sh [--deep] [--sqlite-only] [--iterations N] [--no-tests] [--no-open]"
-      exit 0
-      ;;
+    --data-access) DATA_ACCESS=1; shift ;;
+    --quick) QUICK=1; ITERATIONS=50; shift ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "dotnet is required on PATH." >&2
+  echo "dotnet is required on PATH (./try.sh installs it locally if you have none)." >&2
   exit 1
 fi
 
-if [[ "$SQLITE_ONLY" -eq 1 ]] || ! command -v docker >/dev/null 2>&1; then
+KINDS=(sqlite)
+if [[ "$SQLITE_ONLY" -eq 1 ]]; then
   export EZSC_SKIP_DOCKER=1
-  if [[ "$SQLITE_ONLY" -eq 0 ]]; then
-    echo "Docker not found; running SQLite only (EZSC_SKIP_DOCKER=1)."
-  fi
+elif ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  export EZSC_SKIP_DOCKER=1
+  echo "Docker is not available; running SQLite only."
+else
+  KINDS+=(postgresql mysql sqlserver)
 fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT="$ROOT/artifacts/compare/$STAMP"
-mkdir -p "$OUT/tests" "$OUT/bench"
+mkdir -p "$OUT/tests"
 
 echo "==> Build (Release)"
-dotnet build EzOdata.SimpleCrud.slnx -c Release
-BUILD_STATUS=$?
-if [[ $BUILD_STATUS -ne 0 ]]; then
-  echo "Build failed." >&2
-  exit $BUILD_STATUS
-fi
+dotnet build EzOdata.SimpleCrud.slnx -c Release -nologo -v quiet || { echo "Build failed." >&2; exit 1; }
 
 TEST_STATUS=0
 if [[ "$NO_TESTS" -eq 0 ]]; then
-  echo "==> Tests"
-  set +e
-  dotnet test EzOdata.SimpleCrud.slnx -c Release --no-build --logger trx --results-directory "$OUT/tests"
-  TEST_STATUS=$?
-  set -e
+  for project in tests/EzOdata.SimpleCrud.Tests tests/EzOdata.Entities.AspNetCore.Tests; do
+    echo "==> Tests: $project"
+    dotnet test "$project" -c Release --no-build --logger trx --results-directory "$OUT/tests" || TEST_STATUS=$?
+  done
 fi
 
-echo "==> Benchmarks"
-BENCH_ARGS=(--out "$OUT" --iterations "$ITERATIONS")
-[[ "$DEEP" -eq 1 ]] && BENCH_ARGS+=(--deep)
-[[ "$SQLITE_ONLY" -eq 1 || "${EZSC_SKIP_DOCKER:-}" == "1" ]] && BENCH_ARGS+=(--sqlite-only)
-dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release --no-build -- "${BENCH_ARGS[@]}"
-BENCH_STATUS=$?
+BENCH_STATUS=0
+for kind in "${KINDS[@]}"; do
+  echo "==> Benchmarks: $kind (full log: $OUT/$kind.log)"
+  args=(--only "$kind" --out "$OUT/$kind" --iterations "$ITERATIONS")
+  [[ "$DATA_ACCESS" -eq 1 ]] && args+=(--all)
+  [[ "$QUICK" -eq 1 ]] && args+=(--quick)
+  [[ "$DEEP" -eq 1 ]] && args+=(--deep)
+  dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release --no-build -- "${args[@]}" 2>&1 \
+    | tee "$OUT/$kind.log" \
+    | grep --line-buffered -E "^(Databases|Verified|MISMATCH|Retrying|Skipping|Engines|Wrote|  [a-z]+ +[a-z0-9-]+ +[a-z]+$|// Benchmark: |Unhandled)"
+  status=${PIPESTATUS[0]}
+  if [[ $status -ne 0 ]]; then
+    echo "  $kind failed (exit $status); see $OUT/$kind.log" >&2
+    BENCH_STATUS=$status
+  fi
+done
 
 echo "==> Report"
-REPORT_ARGS=(report --tests "$OUT/tests" --out "$OUT")
-if [[ -f "$OUT/bench/quick.json" ]]; then
-  REPORT_ARGS+=(--bench "$OUT/bench/quick.json")
-fi
-dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release --no-build -- "${REPORT_ARGS[@]}"
+dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release --no-build -- \
+  report --tests "$OUT/tests" --runs "$OUT" --out "$OUT"
 
 if [[ "$NO_OPEN" -eq 0 && -f "$OUT/report.html" ]]; then
   if command -v open >/dev/null 2>&1; then

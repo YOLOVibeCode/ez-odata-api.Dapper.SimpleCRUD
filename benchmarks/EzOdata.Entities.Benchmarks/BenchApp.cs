@@ -45,7 +45,7 @@ public sealed class BenchSession : IAsyncDisposable
     {
         await db.ExecuteAsync(BenchSchema.Create(db.Kind) + BenchSchema.Seed);
         var host = await new HostBuilder()
-            .ConfigureLogging(l => l.SetMinimumLevel(LogLevel.Warning))
+            .ConfigureLogging(l => l.SetMinimumLevel(LogLevel.Warning).AddSimpleConsole(o => o.SingleLine = true))
             .ConfigureWebHost(web =>
             {
                 web.UseTestServer();
@@ -82,7 +82,19 @@ public sealed class BenchSession : IAsyncDisposable
                 });
             })
             .StartAsync();
-        return new BenchSession(engine, db, host);
+        var session = new BenchSession(engine, db, host);
+
+        // ez-odata reads the schema once at startup and only logs a failure; the service would then answer
+        // 404 "Unknown service" forever and every benchmark row would be timing an error. Fail loudly instead.
+        var probe = await session.Client.GetAsync($"{session.Root}/customers?$top=1");
+        if (!probe.IsSuccessStatusCode)
+        {
+            var body = await probe.Content.ReadAsStringAsync();
+            await session.DisposeAsync();
+            throw new InvalidOperationException($"{engine}/{db.Kind} is not serving: {(int)probe.StatusCode} {body}");
+        }
+
+        return session;
     }
 
     public async ValueTask DisposeAsync()

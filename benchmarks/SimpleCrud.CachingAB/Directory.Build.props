@@ -1,0 +1,3 @@
+<Project>
+  <!-- Stand-alone: build Dapper.SimpleCRUD with its own settings, not this repository's (nullable, warnings as errors). -->
+</Project>

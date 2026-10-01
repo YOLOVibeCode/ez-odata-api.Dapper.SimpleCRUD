@@ -80,9 +80,29 @@ jobs:
       - name: Smoke test (installs the packed .nupkg files)
         run: dotnet run --project tests/Smoke -p:SmokeVersion=0.0.0-smoke.${GITHUB_RUN_NUMBER}
 
+  try:
+    # The front door: a fresh clone, no setup-dotnet. try.sh / try.cmd install the SDK if needed, build the
+    # showcase from nuget.org packages, and run the narrated tour (every check must pass).
+    name: Try it (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: ./try.sh --exit
+        if: runner.os != 'Windows'
+        run: ./try.sh --exit --port 5299
+      - name: try.cmd -Exit
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: try.cmd -Exit -Port 5299
+
   publish:
     name: Publish packages
-    needs: [test, smoke]
+    needs: [test, smoke, try]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -158,7 +178,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Compare
-        run: ./compare.sh --no-open
+        run: ./compare.sh --data-access --no-open
       - uses: actions/upload-artifact@v4
         if: always()
         with:

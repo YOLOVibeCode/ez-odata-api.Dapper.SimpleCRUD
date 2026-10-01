@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- The try.sh showcase: three services (SimpleCRUD engine, EF Core engine, stock) over one schema, Swagger UI,
+       and a narrated tour that exercises the whole API. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EzOdata.SimpleCrud.AspNetCore\EzOdata.SimpleCrud.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\EzOdata.EntityFrameworkCore.AspNetCore\EzOdata.EntityFrameworkCore.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

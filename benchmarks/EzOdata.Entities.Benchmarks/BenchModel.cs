@@ -87,7 +87,7 @@ public static class BenchSchema
         "mysql" => """
             DROP TABLE IF EXISTS orders, audit_log, customers;
             CREATE TABLE customers (id INT AUTO_INCREMENT PRIMARY KEY, full_name VARCHAR(200) NOT NULL, email VARCHAR(200), country VARCHAR(10) NOT NULL);
-            CREATE TABLE orders (id INT AUTO_INCREMENT PRIMARY KEY, customer_id INT NOT NULL, total DOUBLE NOT NULL);
+            CREATE TABLE orders (id INT AUTO_INCREMENT PRIMARY KEY, customer_id INT NOT NULL, total DOUBLE NOT NULL, FOREIGN KEY (customer_id) REFERENCES customers(id));
             CREATE TABLE audit_log (id INT AUTO_INCREMENT PRIMARY KEY, entity VARCHAR(50) NOT NULL, entity_id BIGINT, action VARCHAR(50) NOT NULL);
             """,
         "sqlserver" => """

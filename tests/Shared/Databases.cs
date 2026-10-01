@@ -114,6 +114,14 @@ public sealed class Databases : IAsyncLifetime
 
     private async Task Start(string kind, Func<Task> start)
     {
+        // EZSC_DATABASES=postgresql,sqlserver starts only those (one at a time keeps a small Docker VM happy).
+        var only = Environment.GetEnvironmentVariable("EZSC_DATABASES");
+        if (!string.IsNullOrWhiteSpace(only) && !only.Split(',', StringSplitOptions.TrimEntries).Contains(kind))
+        {
+            Failures[kind] = $"not selected (EZSC_DATABASES={only})";
+            return;
+        }
+
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(4));
