@@ -1,8 +1,8 @@
 # Benchmarks: Dapper, Dapper.SimpleCRUD and EF Core
 
-```bash
-./try.sh --benchmark            # or ./compare.sh --data-access; SQLite only without Docker
-```
+**[View the report](https://yolovibecode.github.io/ez-odata-api.Dapper.SimpleCRUD/benchmarks/report.html)**
+(charts, findings, method) · [`results.md`](results.md) (every table) · [`raw/`](raw/) (BenchmarkDotNet
+output and HTTP timings per database)
 
 Two layers, on SQLite, PostgreSQL 16, MySQL 8.4 and SQL Server (Azure SQL Edge on ARM):
 
@@ -11,9 +11,60 @@ Two layers, on SQLite, PostgreSQL 16, MySQL 8.4 and SQL Server (Azure SQL Edge o
 2. **Through the instant API.** Stock ez-odata, the SimpleCRUD engine and the EF Core engine, request by
    request over an in-memory TestServer.
 
-Full results: [`report.html`](report.html) (charts; download it and open it locally) · [`results.md`](results.md)
-(every table) · [`raw/`](raw/) (BenchmarkDotNet output and HTTP timings per database). The run below was on an
-Apple M4 Max with .NET 10.0.1, Dapper 2.0.78, Dapper.SimpleCRUD 2.3.0, EF Core 10.0.0 and ez-odata-api 1.0.7.
+The results below are from an Apple M4 Max with .NET 10.0.1, Dapper 2.0.78, Dapper.SimpleCRUD 2.3.0,
+EF Core 10.0.0 and ez-odata-api 1.0.7. A second, independent run on 2026-10-01 reproduced them: allocations
+matched exactly, and the time ratios were within their error bars.
+
+## Run it yourself
+
+**You need** `git` and `curl`. The .NET 10 SDK is optional: `try.sh` downloads it into `./.dotnet` if it is
+missing. **Docker** is optional too: with it you get PostgreSQL, MySQL and SQL Server; without it, SQLite only.
+
+```bash
+git clone https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD
+cd ez-odata-api.Dapper.SimpleCRUD
+./try.sh --benchmark             # Windows: try.cmd -Benchmark
+```
+
+It builds in Release, then for each database starts only that database's container, checks that every library
+returns the same rows, runs the library benchmark and then the HTTP benchmark, and stops the container. At the
+end it writes the report and opens it.
+
+- **Time:** about 30 minutes with all four databases, plus the first build. SQLite takes about 20 of them,
+  mostly in its 16-concurrent-writers scenario, which waits on SQLite's single write lock. PostgreSQL, MySQL
+  and SQL Server take 2–4 minutes each.
+- **Output:** `artifacts/compare/<timestamp>/report.html` and `report.md`, with one folder per database (the
+  BenchmarkDotNet results and `bench/quick.json`) and one log per database.
+
+Variations:
+
+| Command | What it runs |
+|---|---|
+| `./try.sh --benchmark --sqlite-only` | SQLite only, no Docker |
+| `./try.sh --benchmark --no-open` | Same, without opening the browser (for CI or SSH sessions) |
+| `./compare.sh --data-access` | Also runs the test suite first; the report then includes test results |
+| `./compare.sh --data-access --quick` | Shorter runs (BenchmarkDotNet ShortRun, 50 HTTP samples): a quick look, wider error bars |
+| `./compare.sh` | The HTTP benchmark only (no library benchmark) |
+| `dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release -- --all --only postgresql --out out/pg` | One database, by hand |
+| `dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release -- report --runs out --out out` | Rebuild a report from earlier runs |
+
+The SimpleCRUD reflection-fix comparison has its own script, which downloads both versions of SimpleCRUD from
+GitHub: `benchmarks/SimpleCrud.CachingAB/run.sh` (SQLite and PostgreSQL), or `run.sh sqlite` for SQLite only.
+
+**For trustworthy numbers:**
+- Close other heavy work while it runs; the timings are microbenchmarks.
+- **Docker memory:** SQL Server alone needs about 2 GB. On Colima, give the VM room:
+  `colima stop && colima start --cpu 8 --memory 12`. Your containers survive the restart, but you have to
+  start them again.
+- **Colima socket:** the fixture finds it automatically. Other setups honour `DOCKER_HOST`.
+
+Settings (environment variables):
+
+| Variable | Effect |
+|---|---|
+| `EZSC_SKIP_DOCKER=1` | Never start containers (SQLite only) |
+| `EZSC_DATABASES=postgresql,sqlserver` | Start only these database containers |
+| `EZSC_MSSQL_IMAGE=…` | SQL Server image to use (default: SQL Server 2022 on x64, Azure SQL Edge on ARM) |
 
 ## What the numbers say
 

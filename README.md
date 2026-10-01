@@ -74,7 +74,7 @@ and SQL Server (each in Docker, one at a time; SQLite only without Docker):
 - **Through the instant API:** stock ez-odata against the SimpleCRUD and EF Core engines, request by
   request over HTTP.
 
-In short (full results, method and caveats in [`docs/benchmarks`](docs/benchmarks/README.md)):
+**[View the benchmark report](https://yolovibecode.github.io/ez-odata-api.Dapper.SimpleCRUD/benchmarks/report.html)**. How to run it, the method and the caveats are in [`docs/benchmarks`](docs/benchmarks/README.md). In short:
 
 - On a database server the round trip decides: Get by id on PostgreSQL is 324 µs with hand-written Dapper,
   342 µs with SimpleCRUD and 358 µs with EF Core. In process (SQLite) the library shows: 5.1, 12.0 and 18.3 µs.

@@ -22,7 +22,12 @@ All notable changes to this project are documented here. The format follows
   submitted upstream ([ericdc1/Dapper.SimpleCRUD#283](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/283)),
   compiled side by side from GitHub sources.
 
+- The benchmark report is published with GitHub Pages:
+  <https://yolovibecode.github.io/ez-odata-api.Dapper.SimpleCRUD/benchmarks/report.html>.
+  `docs/benchmarks` explains how to run the benchmark, what it needs, how long it takes, and its settings.
+
 ### Fixed
+- Benchmark report: a difference that rounds to zero printed as "-+0%"; it now prints "0%".
 - Benchmarks: a service whose startup schema read failed answered every request with 404, and three of the
   four HTTP benchmarks timed those 404s without noticing. Sessions now probe the service before use and
   retry once, and every benchmark request checks its status.
