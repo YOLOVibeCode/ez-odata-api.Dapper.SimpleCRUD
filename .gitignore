@@ -11,3 +11,7 @@ TestResults/
 
 # Packed packages (CI and local smoke tests)
 artifacts/
+
+# .NET SDK downloaded by ./try.sh when none is installed
+.dotnet/
+.dotnet-install.*

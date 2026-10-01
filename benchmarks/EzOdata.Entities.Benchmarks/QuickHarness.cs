@@ -16,21 +16,30 @@ public sealed record TimingRow(
 
 public sealed class QuickHarness
 {
+    /// <summary>
+    /// For each database and scenario, the engines take turns request by request (after a shared warm-up), so
+    /// none of them benefits from running later against a warmer database, JIT or connection pool.
+    /// </summary>
     public static async Task<List<TimingRow>> RunAsync(IReadOnlyList<BenchSession> sessions, int iterations)
     {
         var rows = new List<TimingRow>();
-        foreach (var session in sessions)
+        foreach (var group in sessions.GroupBy(s => s.Database.Kind))
         {
-            foreach (var scenario in HttpScenarios(session))
+            var runners = group.Select(s => (Session: s, Scenarios: HttpScenarios(s).ToList())).ToList();
+            var names = runners.SelectMany(r => r.Scenarios.Select(x => x.Name)).Distinct().ToList();
+            foreach (var name in names)
             {
-                rows.Add(await MeasureAsync(session.Engine, session.Database.Kind, scenario.Name, "http", iterations, scenario.Run));
+                var cases = runners
+                    .Where(r => r.Scenarios.Any(x => x.Name == name))
+                    .Select(r => (r.Session.Engine, Layer: "http", Run: r.Scenarios.First(x => x.Name == name).Run))
+                    .ToList();
+                rows.AddRange(await MeasureInterleavedAsync(group.Key, name, iterations, cases));
             }
 
-            if (session.Engine != "stock")
-            {
-                rows.Add(await MeasureAsync(session.Engine, session.Database.Kind, "direct-insert", "direct", iterations,
-                    () => DirectInsertAsync(session)));
-            }
+            var direct = runners.Where(r => r.Session.Engine != "stock")
+                .Select(r => (r.Session.Engine, Layer: "direct", Run: (Func<Task>)(() => DirectInsertAsync(r.Session))))
+                .ToList();
+            rows.AddRange(await MeasureInterleavedAsync(group.Key, "direct-insert", iterations, direct));
         }
 
         return rows;
@@ -55,11 +64,9 @@ public sealed class QuickHarness
                 new { full_name = $"n{i}", email = $"n{i}@b.example", country = "US" });
             response.EnsureSuccessStatusCode();
         });
-        yield return ("get-by-key", () => client.GetAsync($"{root}/customers(1)").ContinueWith(t => t.Result.EnsureSuccessStatusCode()));
-        yield return ("list", () => client.GetAsync($"{root}/customers?$filter=country eq 'US'&$orderby=full_name&$top=10")
-            .ContinueWith(t => t.Result.EnsureSuccessStatusCode()));
-        yield return ("expand", () => client.GetAsync($"{root}/customers?$filter=id eq 1&$expand=orders")
-            .ContinueWith(t => t.Result.EnsureSuccessStatusCode()));
+        yield return ("get-by-key", () => GetOk(client, $"{root}/customers(1)"));
+        yield return ("list", () => GetOk(client, $"{root}/customers?$filter=country eq 'US'&$orderby=full_name&$top=10"));
+        yield return ("expand", () => GetOk(client, $"{root}/customers?$filter=id eq 1&$expand=orders"));
         yield return ("patch", async () =>
         {
             var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Patch, $"{root}/customers(1)")
@@ -103,6 +110,15 @@ public sealed class QuickHarness
         });
     }
 
+    private static async Task GetOk(HttpClient client, string url)
+    {
+        using var response = await client.GetAsync(url);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"GET {url} returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        }
+    }
+
     private static async Task DirectInsertAsync(BenchSession session)
     {
         await using var connection = session.Database.Connect();
@@ -128,30 +144,41 @@ public sealed class QuickHarness
         await context.SaveChangesAsync();
     }
 
-    private static async Task<TimingRow> MeasureAsync(string engine, string database, string scenario, string layer,
-        int iterations, Func<Task> run)
+    private static async Task<List<TimingRow>> MeasureInterleavedAsync(string database, string scenario, int iterations,
+        IReadOnlyList<(string Engine, string Layer, Func<Task> Run)> cases)
     {
-        for (var i = 0; i < Math.Min(20, iterations); i++) await run();
+        foreach (var c in cases) Console.WriteLine($"  {database,-10} {scenario,-14} {c.Engine}");
+        for (var i = 0; i < Math.Min(20, iterations); i++)
+        {
+            foreach (var c in cases) await c.Run();
+        }
 
-        var samples = new double[iterations];
-        var alloc = new long[iterations];
+        var samples = cases.Select(_ => new double[iterations]).ToArray();
+        var alloc = new long[cases.Count];
         var sw = new Stopwatch();
         for (var i = 0; i < iterations; i++)
         {
-            GC.Collect();
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            sw.Restart();
-            await run();
-            sw.Stop();
-            samples[i] = sw.Elapsed.TotalMilliseconds;
-            alloc[i] = GC.GetAllocatedBytesForCurrentThread() - before;
+            for (var k = 0; k < cases.Count; k++)
+            {
+                // Whole-process bytes: the in-memory TestServer and the thread pool continuations are part of
+                // the request. (Per-thread counters miss everything after the first await.)
+                var before = GC.GetTotalAllocatedBytes(precise: false);
+                sw.Restart();
+                await cases[k].Run();
+                sw.Stop();
+                samples[k][i] = sw.Elapsed.TotalMilliseconds;
+                alloc[k] += GC.GetTotalAllocatedBytes(precise: false) - before;
+            }
         }
 
-        Array.Sort(samples);
-        var mean = samples.Average();
-        return new TimingRow(engine, database, scenario, layer, iterations, mean,
-            Percentile(samples, 0.50), Percentile(samples, 0.95), Percentile(samples, 0.99),
-            mean <= 0 ? 0 : 1000.0 / mean, alloc.Average());
+        return cases.Select((c, k) =>
+        {
+            var sorted = samples[k].Order().ToArray();
+            var mean = sorted.Average();
+            return new TimingRow(c.Engine, database, scenario, c.Layer, iterations, mean,
+                Percentile(sorted, 0.50), Percentile(sorted, 0.95), Percentile(sorted, 0.99),
+                mean <= 0 ? 0 : 1000.0 / mean, (double)alloc[k] / iterations);
+        }).ToList();
     }
 
     private static double Percentile(double[] sorted, double p)

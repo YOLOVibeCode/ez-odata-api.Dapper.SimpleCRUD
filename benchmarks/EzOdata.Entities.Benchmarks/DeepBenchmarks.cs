@@ -6,6 +6,7 @@ using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Filters;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
 
@@ -43,29 +44,47 @@ public class EngineBenchmarks
     }
 
     [Benchmark]
-    public Task GetByKey() => _session!.Client.GetAsync($"{_session.Root}/customers(1)");
+    public async Task GetByKey() => (await _session!.Client.GetAsync($"{_session.Root}/customers(1)")).EnsureSuccessStatusCode();
 
     [Benchmark]
-    public Task List() => _session!.Client.GetAsync($"{_session.Root}/customers?$filter=country eq 'US'&$orderby=full_name&$top=10");
+    public async Task List() => (await _session!.Client.GetAsync($"{_session.Root}/customers?$filter=country eq 'US'&$orderby=full_name&$top=10")).EnsureSuccessStatusCode();
 
     [Benchmark]
-    public Task Expand() => _session!.Client.GetAsync($"{_session.Root}/customers?$filter=id eq 1&$expand=orders");
+    public async Task Expand() => (await _session!.Client.GetAsync($"{_session.Root}/customers?$filter=id eq 1&$expand=orders")).EnsureSuccessStatusCode();
 
     public static int Run(string artifacts)
     {
-        var dir = Path.Combine(artifacts, "bdn");
+        BenchmarkRunner.Run<EngineBenchmarks>(Config(Path.Combine(artifacts, "bdn")));
+        return 0;
+    }
+
+    /// <summary>ShortRun, in process (the sessions and containers live in this process), EF Core × MySQL filtered out.</summary>
+    public static IConfig Config(string dir, bool thorough = false)
+    {
         Directory.CreateDirectory(dir);
-        var config = ManualConfig.CreateEmpty()
-            .AddJob(Job.ShortRun.WithToolchain(InProcessEmitToolchain.Instance).WithId("inproc"))
+        // Thorough: 20 measured iterations of ~250 ms each (writes against a real database are noisy; ShortRun's
+        // 3 iterations are not enough to separate libraries).
+        var job = thorough
+            ? Job.Default.WithWarmupCount(5).WithIterationCount(20).WithIterationTime(Perfolizer.Horology.TimeInterval.FromMilliseconds(250))
+            : Job.ShortRun;
+        return ManualConfig.CreateEmpty()
+            .AddJob(job.WithToolchain(InProcessEmitToolchain.Instance).WithId(thorough ? "inproc-20" : "inproc"))
             .AddDiagnoser(MemoryDiagnoser.Default)
             .AddColumnProvider(DefaultColumnProviders.Instance)
             .AddLogger(BenchmarkDotNet.Loggers.ConsoleLogger.Default)
             .AddExporter(MarkdownExporter.GitHub)
             .AddExporter(HtmlExporter.Default)
             .AddExporter(JsonExporter.Full)
+            .AddFilter(new SimpleFilter(b => !Unsupported(b)))
             .WithArtifactsPath(dir)
-            .WithOptions(ConfigOptions.DisableOptimizationsValidator | ConfigOptions.KeepBenchmarkFiles);
-        BenchmarkRunner.Run<EngineBenchmarks>(config);
-        return 0;
+            .WithOptions(ConfigOptions.DisableOptimizationsValidator | ConfigOptions.KeepBenchmarkFiles | ConfigOptions.JoinSummary);
+    }
+
+    private static bool Unsupported(BenchmarkCase b)
+    {
+        var db = b.Parameters.Items.FirstOrDefault(p => p.Name == "Database")?.Value as string;
+        var who = b.Parameters.Items.FirstOrDefault(p => p.Name is "Engine" or "Library")?.Value as string;
+        if (who == "SimpleCRUDStatic") return db != "sqlite"; // process-wide dialect: one database only
+        return db == "mysql" && who is not null && who.StartsWith("efcore", StringComparison.OrdinalIgnoreCase);
     }
 }

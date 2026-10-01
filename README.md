@@ -26,6 +26,65 @@ without changing ez-odata-api at all:
 ez-odata-api is used unmodified. Its `AddEzOData` / `MapEzOData` calls stay exactly as documented.
 Design and requirements (each mapped to a test) are in [`specification.md`](specification.md).
 
+## Try it in one command
+
+```bash
+git clone https://github.com/YOLOVibeCode/ez-odata-api.Dapper.SimpleCRUD && cd ez-odata-api.Dapper.SimpleCRUD
+./try.sh          # Windows: try.cmd
+```
+
+You need nothing but `git` and `curl`. If the .NET 10 SDK is missing, `try.sh` downloads it into `./.dotnet`
+(no admin rights, nothing installed system-wide); packages come from nuget.org. It then starts
+[the showcase](samples/EzOdata.Showcase): a shop database (500 customers, orders, composite-key order
+lines) served three ways on one port, by stock ez-odata, by the SimpleCRUD engine and by the EF Core
+engine. Swagger UI opens at `http://localhost:5199/swagger`, and a narrated tour runs every feature
+against the live API and checks the result:
+
+| Tour section | What it proves |
+|---|---|
+| Discover | Swagger UI, one OpenAPI document per service and dialect, the service document, CSDL `$metadata` |
+| Query | `$filter` / `$orderby` / `$top` / `$select`, `$count`, server paging, string functions, `in`, `$expand` with nested options, navigation filters, `any()`, `$apply` aggregation, the REST dialect, composite keys, a clean 400 on a bad property |
+| Writes (on both engines) | validation (400), a unique violation (409), typed hooks, an audit row in the same transaction, `Reject()` rolling back a whole insert, soft delete, `OnCommitted` firing once, composite-key inserts |
+| Security | a row filter per sales rep, 404 for rows outside it, 403 for forged owners, a handler rule, a masked field for viewers, read-only roles |
+| Engines side by side | the three services timed on the same requests, interleaved |
+
+```bash
+./try.sh --exit        # run the tour and exit with its result (what CI runs on Linux, macOS and Windows)
+./try.sh --port 8080   # another port; --no-open to skip the browser
+./try.sh --benchmark   # the full benchmark below, then an HTML report
+```
+
+Swagger UI calls run as the anonymous developer (full access, Development only). To see the security
+rules, send the showcase's demo headers:
+
+```bash
+curl -H 'X-Demo-User: rep-1' 'http://localhost:5199/api/odata/simplecrud/customers?$count=true&$top=3'   # 100 of 500: own rows only
+curl -H 'X-Demo-User: v' -H 'X-Demo-Roles: viewer' 'http://localhost:5199/api/odata/efcore/customers?$top=3'  # emails masked
+```
+
+## Benchmarks: Dapper, Dapper.SimpleCRUD and EF Core
+
+`./try.sh --benchmark` (or `./compare.sh --data-access`) measures two layers on SQLite, PostgreSQL, MySQL
+and SQL Server (each in Docker, one at a time; SQLite only without Docker):
+
+- **The libraries on their own:** hand-written Dapper, Dapper.SimpleCRUD (through this facade and through
+  its own static API), EF Core tracked and `AsNoTracking`. Get by id, a filtered page, insert, update,
+  insert + delete, and 100 inserts in a transaction, with BenchmarkDotNet. Every library must return the
+  same rows before anything is timed.
+- **Through the instant API:** stock ez-odata against the SimpleCRUD and EF Core engines, request by
+  request over HTTP.
+
+In short (full results, method and caveats in [`docs/benchmarks`](docs/benchmarks/README.md)):
+
+- On a database server the round trip decides: Get by id on PostgreSQL is 324 µs with hand-written Dapper,
+  342 µs with SimpleCRUD and 358 µs with EF Core. In process (SQLite) the library shows: 5.1, 12.0 and 18.3 µs.
+- EF Core batches bulk inserts: 100 rows in 2.6 ms on PostgreSQL, against 31–33 ms row by row.
+- Running SimpleCRUD through this facade costs nothing measurable (−6% to +2%, inside the confidence intervals).
+- Through the API, reads cost the same on every engine; writes add 0.3–0.6 ms with SimpleCRUD and 0.4–1.4 ms
+  with EF Core.
+- The benchmark led to an upstream fix: caching SimpleCRUD's per-type property lists cuts `Get` by 24% and
+  its allocations by 62% ([ericdc1/Dapper.SimpleCRUD#283](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/283)).
+
 ## Quick start
 
 ```csharp
@@ -206,12 +265,14 @@ Compare both engines (tests + timings + a side-by-side HTML report):
 
 ```bash
 ./compare.sh                  # or double-click compare.command / compare.cmd
+./compare.sh --data-access    # also Dapper vs SimpleCRUD vs EF Core on their own (BenchmarkDotNet)
 ./compare.sh --sqlite-only    # no Docker
-./compare.sh --deep           # BenchmarkDotNet in-process
+./compare.sh --quick          # shorter runs
 ./demo-swagger.sh             # or demo-swagger.cmd: Swagger + read shop + warehouse + timings
 ```
 
-Output lands in `artifacts/compare/<timestamp>/` (`tests/`, `bench/`, `report.html`).
+Output lands in `artifacts/compare/<timestamp>/`: `tests/`, one folder and log per database, and
+`report.html` / `report.md`.
 
 `demo-swagger.sh` starts the sample (two SQLite databases), prints each OpenAPI `servers[0].url`,
 reads `products` from shop and warehouse, then times both.
