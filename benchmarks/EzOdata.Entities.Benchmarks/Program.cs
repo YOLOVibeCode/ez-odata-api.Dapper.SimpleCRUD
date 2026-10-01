@@ -45,7 +45,9 @@ if (dataAccess || all)
 
     Console.WriteLine("Verified: every library reads, inserts, updates and deletes the same rows the same way.");
     BenchmarkDotNet.Running.BenchmarkRunner.Run([typeof(DataAccessReads), typeof(DataAccessWrites)],
-        EngineBenchmarks.Config(Path.Combine(artifacts, "data-access"), thorough: !argsList.Contains("--quick")));
+        EngineBenchmarks.Config(Path.Combine(artifacts, "data-access"), iterations: argsList.Contains("--quick") ? 0
+            : int.TryParse(Arg(argsList, "--bdn-iterations"), out var bdn) ? bdn
+            : BenchWorld.DatabaseKinds.All(k => k == "sqlite") ? 20 : 50));
     if (!all) return 0;
 }
 

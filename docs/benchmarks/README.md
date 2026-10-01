@@ -2,7 +2,8 @@
 
 **[View the report](https://yolovibecode.github.io/ez-odata-api.Dapper.SimpleCRUD/benchmarks/report.html)**
 (charts, findings, method) · [`results.md`](results.md) (every table) · [`raw/`](raw/) (BenchmarkDotNet
-output and HTTP timings per database)
+output and HTTP timings per database) · **[Drop-in analysis](drop-in.md)** (what adding the package to a new
+project costs, and how it references SimpleCRUD at run time)
 
 Two layers, on SQLite, PostgreSQL 16, MySQL 8.4 and SQL Server (Azure SQL Edge on ARM):
 
@@ -30,9 +31,10 @@ It builds in Release, then for each database starts only that database's contain
 returns the same rows, runs the library benchmark and then the HTTP benchmark, and stops the container. At the
 end it writes the report and opens it.
 
-- **Time:** about 30 minutes with all four databases, plus the first build. SQLite takes about 20 of them,
-  mostly in its 16-concurrent-writers scenario, which waits on SQLite's single write lock. PostgreSQL, MySQL
-  and SQL Server take 2–4 minutes each.
+- **Time:** about 40 minutes with all four databases, plus the first build. SQLite takes about 21 of them,
+  mostly in its 16-concurrent-writers scenario, which waits on SQLite's single write lock. PostgreSQL and SQL
+  Server take 6–8 minutes each at 50 iterations. MySQL takes about 2½, with fewer cases because EF Core has no
+  MySQL provider.
 - **Output:** `artifacts/compare/<timestamp>/report.html` and `report.md`, with one folder per database (the
   BenchmarkDotNet results and `bench/quick.json`) and one log per database.
 
@@ -44,6 +46,8 @@ Variations:
 | `./try.sh --benchmark --no-open` | Same, without opening the browser (for CI or SSH sessions) |
 | `./compare.sh --data-access` | Also runs the test suite first; the report then includes test results |
 | `./compare.sh --data-access --quick` | Shorter runs (BenchmarkDotNet ShortRun, 50 HTTP samples): a quick look, wider error bars |
+| `... --bdn-iterations 100` (benchmark project argument) | More measured iterations for narrower error bars (default: 20 on SQLite, 50 elsewhere) |
+| `benchmarks/DropIn/run.sh` | The [drop-in analysis](drop-in.md): fresh projects from nuget.org, cold start, memory, HTTP over sockets |
 | `./compare.sh` | The HTTP benchmark only (no library benchmark) |
 | `dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release -- --all --only postgresql --out out/pg` | One database, by hand |
 | `dotnet run --project benchmarks/EzOdata.Entities.Benchmarks -c Release -- report --runs out --out out` | Rebuild a report from earlier runs |
@@ -101,6 +105,36 @@ Two scenarios to read with care:
 - SQLite's `concurrent-16` row (about 1.6 s) measures SQLite's single-writer lock retries, not the engines.
 - EF Core × MySQL is not measured: there is no MySqlConnector-based EF Core 10 provider yet.
 
+## Resolution: how many samples
+
+A benchmark can only separate two libraries when their confidence intervals don't overlap. BenchmarkDotNet
+reports a 99.9% interval for every mean. With random noise, its width shrinks with the square root of the number
+of measured iterations, so going from 20 to 50 should make it about 1.58× narrower.
+
+Median width of the interval, relative to the mean, across every (library, operation) case in a run (and the
+widest case):
+
+| Run | sqlite | postgresql | mysql | sqlserver |
+|---|---:|---:|---:|---:|
+| 2026-09-30 (20 iterations) | ±2.1% (worst ±5%), n=19 | ±8.2% (worst ±17%), n=19 | ±7.7% (worst ±12%), n=18 | ±5.5% (worst ±11%), n=19 |
+| 2026-10-01 morning (20 iterations) | ±2.2% (worst ±13%), n=19 | ±9.9% (worst ±25%), n=19 | ±9.8% (worst ±16%), n=18 | ±8.2% (worst ±60%), n=18 |
+| 2026-10-01 (SQLite 20, others 50) | ±7.9% (worst ±25%), n=19 | ±7.3% (worst ±40%), n=46 | ±33.5% (worst ±43%), n=48 | ±4.2% (worst ±37%), n=48 |
+
+- **More samples help where the noise is random.** SQL Server's intervals narrowed 1.65× at 50 iterations, close
+  to the predicted 1.58×. On PostgreSQL the change was smaller, 1.24×.
+- **They can't fix a busy machine.** During the third run this Mac was also running Cursor, an active TeamViewer
+  session and its window server (a load average of 26 on 16 cores). SQLite, still at 20 iterations, got four
+  times noisier, and MySQL's intervals reached ±34%. That's interference, not random noise: it shifts results
+  rather than averaging out, so more samples don't remove it.
+- **Why networked databases need more samples:** in-process SQLite is tight at 20 iterations (about ±2% when
+  the machine is quiet). A database behind Docker's network adds round-trip jitter, so 20 iterations leave
+  ±6–10%. That's why several SimpleCRUD-against-EF-Core differences on PostgreSQL and SQL Server are inside the
+  error bars.
+
+So the benchmark now measures 50 iterations on PostgreSQL, MySQL and SQL Server, and 20 on SQLite.
+`--bdn-iterations N` overrides both. The published results stay those of 2026-09-30, the quietest run. For the
+best resolution, run on an idle machine: close screen sharing, IDEs and sync clients, and keep the laptop on power.
+
 ## What we had to fix to trust these numbers
 
 The first runs looked plausible but were wrong in several ways. Each fix is in this branch.
@@ -155,7 +189,8 @@ versions from GitHub, so it needs nothing from this repository.
 
 ## Method
 
-- **Library benchmarks:** BenchmarkDotNet 0.15.2, in process, with the memory diagnoser. Each (library,
+- **Library benchmarks:** BenchmarkDotNet 0.15.2, in process, with the memory diagnoser. 5 warm-up iterations, then
+  20 measured iterations on SQLite and 50 on PostgreSQL, MySQL and SQL Server (see [Resolution](#resolution-how-many-samples)). Each (library,
   database) case starts from a freshly created table with 5,000 rows, and each operation opens a pooled
   connection, as a web request would.
 - **Same work for everyone:** Dapper runs hand-written SQL and reads the new id back (`RETURNING`, `OUTPUT` or
