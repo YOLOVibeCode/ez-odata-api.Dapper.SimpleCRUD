@@ -84,7 +84,7 @@ and SQL Server (each in Docker, one at a time; SQLite only without Docker):
   with EF Core.
 - Dropped into a new project, the SimpleCRUD engine adds 0.5 MB and about 30 ms of cold start to stock ez-odata;
   the EF Core engine adds 19 MB and about 160 ms ([drop-in analysis](docs/benchmarks/drop-in.md)).
-- The benchmark led to an upstream fix: caching SimpleCRUD's per-type property lists cuts `Get` by 24% and
+- The benchmark led to an upstream enhancement: caching SimpleCRUD's per-type property lists cuts `Get` by 24% and
   its allocations by 62% ([ericdc1/Dapper.SimpleCRUD#283](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/283)).
 
 ## Quick start
@@ -421,8 +421,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 - [**Dapper.SimpleCRUD**](https://github.com/ericdc1/Dapper.SimpleCRUD) by Eric Coffman
   ([@ericdc1](https://github.com/ericdc1)) does the real work: entity mapping and every write. It is used
-  unmodified. A fix found while building this is offered upstream; see [`ERIC.md`](ERIC.md) and
-  [`docs/upstream`](docs/upstream/README.md).
+  unmodified. Building this produced two upstream contributions: a fix for stale dialect quoting
+  ([#282](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/282)) and an enhancement that caches per-type property
+  lists ([#283](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/283)). See [`ERIC.md`](ERIC.md), [`TEAM.md`](TEAM.md)
+  and [`docs/upstream`](docs/upstream/README.md).
 - [**Dapper**](https://github.com/DapperLib/Dapper) by the Stack Overflow team.
 - [**ez-odata-api**](https://github.com/YOLOVibeCode/ez-odata-api) provides the protocol, policy and docs engine, also used unmodified.
 

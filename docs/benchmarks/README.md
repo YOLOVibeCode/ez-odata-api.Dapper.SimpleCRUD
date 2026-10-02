@@ -82,7 +82,7 @@ Across the four databases (geometric mean), SimpleCRUD costs 1.04–1.24× Dappe
 EF Core 1.15–1.60×.
 
 **Allocations are where SimpleCRUD pays most.** It allocates 3.4× what Dapper does on Get by id and 2.7× on
-Update. Most of that is reflection repeated on every call. See [the upstream fix](#what-we-changed-in-simplecrud).
+Update. Most of that is reflection repeated on every call. See [the upstream enhancement](#what-we-changed-in-simplecrud).
 
 **Bulk inserts: EF Core wins by an order of magnitude on networked servers.** 100 inserts in one transaction
 take 2.6 ms with EF Core on PostgreSQL and 6.0 ms on SQL Server. Dapper's list form takes 31 ms and 64 ms, and
@@ -153,8 +153,8 @@ The first runs looked plausible but were wrong in several ways. Each fix is in t
 
 ## What we changed in SimpleCRUD
 
-The allocation gap pointed at SimpleCRUD itself, not at our facade: the facade compiles its delegates once, and
-the static API allocates the same bytes. Reading SimpleCRUD's source showed why. On every call:
+The allocation gap was an opportunity inside SimpleCRUD itself: our facade compiles its delegates once, and
+SimpleCRUD's static API allocates the same bytes. Reading SimpleCRUD's source showed where. On every call:
 
 - `GetScaffoldableProperties<T>()` runs `typeof(T).GetProperties()` and then `GetCustomAttributes(true)` on each
   property, several times, to filter them. `GetCustomAttributes` creates new attribute objects each time.
@@ -162,10 +162,10 @@ the static API allocates the same bytes. Reading SimpleCRUD's source showed why.
 - `BuildSelect` has a cached result, but its cache key is a `string.Join` of every property's full name, built
   on every call just to look the cached string up.
 
-None of this changes for a given type. So the fix computes both property lists once per type and gives
+None of this changes for a given type. So the enhancement computes both property lists once per type and gives
 `BuildSelect` a per-type key, like SimpleCRUD's other SQL builders already have. It is 30 lines added and 19
 removed, with no public API change. Because the lists do not depend on the dialect or the name resolvers,
-nothing needs clearing when those change. That keeps the fix independent of
+nothing needs clearing when those change. That keeps the enhancement independent of
 [#282](https://github.com/ericdc1/Dapper.SimpleCRUD/pull/282) (stale dialect quoting); the two merge cleanly.
 
 Both builds were compiled from source into one process and checked for identical results first.
